@@ -8,7 +8,7 @@ const NAV_ITEMS = [
   { href: 'people.html', label: 'People', built: true },
   { href: 'plans.html', label: 'Plans', built: true },
   { href: 'photos.html', label: 'Photos', built: true },
-  { href: 'stats.html', label: 'Statistics', built: false },
+  { href: 'stats.html', label: 'Statistics', built: true },
 ];
 
 function renderNav(activeHref) {
@@ -268,6 +268,24 @@ function emptyStateHtml(title, message, actionHtml) {
     </div>`;
 }
 
+// A simple dependency-free horizontal bar list (label, count, proportional
+// bar) -- used throughout Statistics instead of pulling in a charting
+// library. `items` is [{label, count, href?}]; bars are scaled against the
+// largest count in the list. Rows with an href render as clickable cards
+// (e.g. Most Visited Temples/People link to their detail page).
+function statBarListHtml(items, emptyMessage) {
+  if (!items.length) return `<p class="note">${escapeHtml(emptyMessage || 'No data for this period.')}</p>`;
+  const max = Math.max(...items.map(i => i.count), 1);
+  return `<div class="stat-bar-list">${items.map(i => {
+    const pct = Math.round((i.count / max) * 100);
+    const row = `
+      <div class="stat-bar-label">${escapeHtml(i.label)}</div>
+      <div class="stat-bar-track"><div class="stat-bar-fill" style="width:${pct}%"></div></div>
+      <div class="stat-bar-count">${i.count}</div>`;
+    return i.href ? `<a class="stat-bar-row" href="${i.href}">${row}</a>` : `<div class="stat-bar-row">${row}</div>`;
+  }).join('')}</div>`;
+}
+
 // ---- Streak (consecutive weeks, week starts Sunday) ----
 
 function startOfWeek(date) {
@@ -276,12 +294,16 @@ function startOfWeek(date) {
   return d;
 }
 
-function currentWeeklyStreak(visitDates) {
-  if (!visitDates.length) return 0;
-  const weekStarts = new Set(visitDates.map(ds => {
+function weekStartSet(visitDates) {
+  return new Set(visitDates.map(ds => {
     const [y, m, d] = ds.split('-').map(Number);
     return startOfWeek(new Date(y, m - 1, d)).getTime();
   }));
+}
+
+function currentWeeklyStreak(visitDates) {
+  if (!visitDates.length) return 0;
+  const weekStarts = weekStartSet(visitDates);
   let streak = 0;
   let cursor = startOfWeek(new Date());
   while (weekStarts.has(cursor.getTime())) {
@@ -290,6 +312,28 @@ function currentWeeklyStreak(visitDates) {
     cursor.setDate(cursor.getDate() - 7);
   }
   return streak;
+}
+
+// Longest run of consecutive weeks (any time in history) with at least one
+// qualifying Visit. Sorts the distinct week-start timestamps and walks them
+// looking for 7-day (one week) gaps.
+function longestWeeklyStreak(visitDates) {
+  const weekStarts = Array.from(weekStartSet(visitDates)).sort((a, b) => a - b);
+  if (!weekStarts.length) return 0;
+  const oneWeekMs = 7 * 24 * 60 * 60 * 1000;
+  let longest = 1, current = 1;
+  for (let i = 1; i < weekStarts.length; i++) {
+    const gapWeeks = Math.round((weekStarts[i] - weekStarts[i - 1]) / oneWeekMs);
+    current = gapWeeks === 1 ? current + 1 : 1;
+    longest = Math.max(longest, current);
+  }
+  return longest;
+}
+
+// Distinct weeks (Sunday-start) in the given calendar year that contain at
+// least one qualifying Visit.
+function weeksWithVisitInYear(visitDates, year) {
+  return weekStartSet(visitDates.filter(ds => ds.startsWith(String(year)))).size;
 }
 
 // ---- Google Maps ----

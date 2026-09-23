@@ -10,7 +10,7 @@ shared `users`/`sessions` login via **My Apps Hub** SSO. Multi-user: anyone
 granted access can log in, but every row is scoped by `user_id`, so each
 person's Temples/Visits/People/Plans/Photos stay private to them.
 
-## Status: Phases 1-3 live; a Phase 3 fix + addition pending deployment
+## Status: Phases 1-3 live; Phase 4 built (pure front end, no deploy steps beyond pushing)
 
 - [x] Phase 0 -- project foundation, schema, API auth skeleton
 - [x] Phase 1 -- Temples, People, Visits CRUD + full front end (Dashboard,
@@ -43,11 +43,24 @@ person's Temples/Visits/People/Plans/Photos stay private to them.
       "Coming Up" section (nearest upcoming Plan + quick actions); Temple
       Detail gained "Plan a Visit" + an "Upcoming Plans" list; Visit Detail
       links back to its originating Plan when there is one.
-      **Deployed and confirmed working** (Plans/Log This Visit/Maps); the
-      Appointment Scheduled flag and the Calendar-link fix above landed
-      afterward and still need the `appointment_scheduled` column migration
-      + `api.php` re-upload -- see `SETUP.md` section 6/6.1.
-- [ ] Phase 4 -- Statistics & streaks
+      **Deployed and confirmed working**, including the Appointment
+      Scheduled flag and the Add to Google Calendar fix (see "Known Phase 3
+      simplifications" for that debugging story).
+- [x] Phase 4 -- Statistics (`stats.html`): Reporting Period selector (This
+      Month/This Year/Last Year/All Time/Custom Range, default This Year),
+      Summary Cards, Visit Streak + a separate Temple Work Streak (current/
+      longest weekly streak, weeks-with-a-visit this year), Visits Over
+      Time (Month/Quarter/Year toggle), Most Visited Temples, Visit
+      Purpose and Work Performed breakdowns + common Work combinations,
+      People (ranked by visits together), and Geographic (by State/Region,
+      by Country) -- all clickable through to the relevant Temple/Person
+      page. Computed entirely **client-side** from the existing
+      `temples`/`visits`/`people` actions -- no new schema or API endpoints,
+      since a personal visit log is small enough to crunch in the browser.
+      `statBarListHtml()` in `js/app.js` is a small dependency-free bar-list
+      renderer used throughout, so this didn't need a charting library.
+      Deferred (spec marks these optional/future anyway): Visit Calendar
+      view, Activity Heat Map, Year in Review.
 - [ ] Phase 5 -- Search, filters, Nearby Temples, polish
 - [ ] Phase 6 -- Share Temple List (and Planned Visits, once Phase 3 exists)
       with another Temple Time user via an in-app share code -- design in
@@ -134,3 +147,24 @@ to matter:
   (matching Life Tempo's approach), which correctly rolls hour overflow
   into the next day. Lesson: when a working reference implementation
   exists elsewhere, diff against it before inventing a new theory.
+
+## Known Phase 4 simplifications
+
+- No Visit Calendar view, Activity Heat Map, or Year in Review -- the spec
+  itself marks these optional/future (sections 12.13-12.15), not deferred
+  for effort reasons.
+- Visits Over Time always covers all-time history regardless of the
+  Reporting Period selector (with Month capped to the last 12 buckets and
+  Quarter to the last 8, so the list doesn't grow unbounded) -- it's a
+  trend view, so re-scoping it to "This Month" would make it show one bar.
+  Every other section respects the selected period.
+- Visit Streak and Temple Work Streak are always "as of today," not scoped
+  to the Reporting Period either -- a streak is inherently about the
+  present, not a historical window.
+- "Weeks With a Visit" is pinned to the current calendar year, matching
+  the spec's own wording (12.3), independent of the Reporting Period.
+- People/Most Visited Temples rank the top 10 by visit count within the
+  period; there's no "view all" for the full list.
+- Dashboard's existing summary cards (Total Visits, Different Temples,
+  etc.) aren't yet linked through to Statistics -- spec section 6.4 says
+  "clickable where practical," not done for Phase 4.

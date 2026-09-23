@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Statistics — Temple Time</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="bar">
+    <h1>Temple Time</h1>
+    <nav id="site-nav"></nav>
+    <div class="header-right"><button class="btn secondary" id="logout-btn">Log Out</button></div>
+  </div>
+</header>
+
+<main>
+  <div id="content"><p class="note">Loading...</p></div>
+</main>
+
+<script src="js/api.js"></script>
+<script src="js/app.js"></script>
+<script>
+let _visits = [];
+let _temples = [];
+let _people = [];
+let _vocab = { purposes: [], workTypes: [] };
+let _period = 'year';
+let _customFrom = '';
+let _customTo = '';
+let _trendGranularity = 'month';
+
+const PERIODS = [
+  { key: 'month', label: 'This Month' },
+  { key: 'year', label: 'This Year' },
+  { key: 'lastyear', label: 'Last Year' },
+  { key: 'all', label: 'All Time' },
+  { key: 'custom', label: 'Custom Range' },
+];
+
+function pad2(n) { return String(n).padStart(2, '0'); }
+function ymd(y, m, d) { return `${y}-${pad2(m)}-${pad2(d)}`; }
+
+function periodRange() {
+  const now = new Date();
+  const y = now.getFullYear();
+  switch (_period) {
+    case 'month': {
+      const lastDay = new Date(y, now.getMonth() + 1, 0).getDate();
+      return [ymd(y, now.getMonth() + 1, 1), ymd(y, now.getMonth() + 1, lastDay)];
+    }
+    case 'year': return [ymd(y, 1, 1), ymd(y, 12, 31)];
+    case 'lastyear': return [ymd(y - 1, 1, 1), ymd(y - 1, 12, 31)];
+    case 'custom': return [_customFrom || null, _customTo || null];
+    default: return [null, null]; // all time
+  }
+}
+
+function inRange(dateStr, from, to) {
+  if (from && dateStr < from) return false;
+  if (to && dateStr > to) return false;
+  return true;
+}
+
+function periodLabel() {
+  const p = PERIODS.find(x => x.key === _period);
+  return p ? p.label : 'This Year';
+}
+
+// ---- Section builders (all take the period-filtered visit list) ----
+
+function visitsOverTimeHtml(allVisits, granularity) {
+  const buckets = {};
+  allVisits.forEach(v => {
+    const [y, m] = v.VisitDate.split('-').map(Number);
+    let key, label;
+    if (granularity === 'year') {
+      key = `${y}`; label = `${y}`;
+    } else if (granularity === 'quarter') {
+      const q = Math.ceil(m / 3);
+      key = `${y}-Q${q}`; label = `Q${q} ${y}`;
+    } else {
+      key = `${y}-${pad2(m)}`;
+      label = new Date(y, m - 1, 1).toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
+    }
+    if (!buckets[key]) buckets[key] = { label, count: 0 };
+    buckets[key].count++;
+  });
+  let list = Object.keys(buckets).sort().map(k => buckets[k]);
+  const cap = granularity === 'month' ? 12 : granularity === 'quarter' ? 8 : 100;
+  list = list.slice(-cap);
+  return statBarListHtml(list, 'No Visits recorded yet.');
+}
+
+function mostVisitedTemplesHtml(visits) {
+  const counts = {};
+  visits.forEach(v => {
+    if (!counts[v.TempleId]) counts[v.TempleId] = { label: v.TempleName, count: 0, href: `temple.html?id=${v.TempleId}` };
+    counts[v.TempleId].count++;
+  });
+  const list = Object.values(counts).sort((a, b) => b.count - a.count).slice(0, 10);
+  return statBarListHtml(list, 'No Visits in this period.');
+}
+
+function purposeStatsHtml(visits) {
+  const list = (_vocab.purposes || []).map(p => ({
+    label: p,
+    count: visits.filter(v => (v.Purposes || []).includes(p)).length,
+  }));
+  return statBarListHtml(list, 'No Visits in this period.');
+}
+
+function workStatsHtml(visits) {
+  const list = (_vocab.workTypes || []).map(w => ({
+    label: w,
+    count: visits.filter(v => (v.WorkPerformed || []).includes(w)).length,
+  }));
+  return statBarListHtml(list, 'No Visits in this period.');
+}
+
+function workCombinationsHtml(visits) {
+  const counts = {};
+  visits.forEach(v => {
+    const combo = workShorthand(v.WorkPerformed);
+    if (combo) counts[combo] = (counts[combo] || 0) + 1;
+  });
+  const list = Object.entries(counts).map(([label, count]) => ({ label, count })).sort((a, b) => b.count - a.count);
+  return statBarListHtml(list, 'No Work Performed combinations in this period.');
+}
+
+function peopleStatsHtml(visits) {
+  const counts = {};
+  visits.forEach(v => (v.WhoWith || []).forEach(p => {
+    if (!counts[p.Id]) counts[p.Id] = { label: p.Name, count: 0, href: `person.html?id=${p.Id}` };
+    counts[p.Id].count++;
+  }));
+  const list = Object.values(counts).sort((a, b) => b.count - a.count).slice(0, 10);
+  return statBarListHtml(list, 'No one recorded as Who With in this period.');
+}
+
+function geoStatsHtml(visits) {
+  const templeIds = new Set(visits.map(v => v.TempleId));
+  const visitedTemples = _temples.filter(t => templeIds.has(t.Id));
+  const byField = field => {
+    const counts = {};
+    visitedTemples.forEach(t => {
+      const key = t[field] || 'Unknown';
+      counts[key] = (counts[key] || 0) + 1;
+    });
+    return Object.entries(counts).map(([label, count]) => ({ label, count })).sort((a, b) => b.count - a.count);
+  };
+  return `
+    <div class="stats-subgrid">
+      <div>
+        <h4>By State / Region</h4>
+        ${statBarListHtml(byField('StateRegion'), 'No data.')}
+      </div>
+      <div>
+        <h4>By Country</h4>
+        ${statBarListHtml(byField('Country'), 'No data.')}
+      </div>
+    </div>`;
+}
+
+function renderStats() {
+  const [from, to] = periodRange();
+  const visits = _visits.filter(v => inRange(v.VisitDate, from, to));
+
+  const templeIds = new Set(visits.map(v => v.TempleId));
+  const workVisits = visits.filter(v => (v.Purposes || []).includes('Temple Work'));
+  const firstTimeCount = _temples.filter(t =>
+    templeIds.has(t.Id) && t.FirstVisitDate && inRange(t.FirstVisitDate, from, to)).length;
+
+  const thisYear = new Date().getFullYear();
+  const allVisitDates = _visits.map(v => v.VisitDate);
+
+  document.getElementById('summary-cards').innerHTML = statRowHtml([
+    { num: visits.length, label: 'Temple Visits' },
+    { num: templeIds.size, label: 'Different Temples' },
+    { num: firstTimeCount, label: 'First-Time Temples' },
+    { num: workVisits.length, label: 'Temple Work Visits' },
+    { num: visits.length - workVisits.length, label: 'Other Temple Visits' },
+    { num: currentWeeklyStreak(allVisitDates), label: 'Current Streak' },
+  ]);
+
+  document.getElementById('streak-cards').innerHTML = statRowHtml([
+    { num: currentWeeklyStreak(allVisitDates), label: 'Current Weekly Streak' },
+    { num: longestWeeklyStreak(allVisitDates), label: 'Longest Weekly Streak' },
+    { num: weeksWithVisitInYear(allVisitDates, thisYear), label: `Weeks With a Visit (${thisYear})` },
+  ]);
+
+  const workOnlyDates = _visits.filter(v => (v.Purposes || []).includes('Temple Work')).map(v => v.VisitDate);
+  document.getElementById('work-streak-cards').innerHTML = statRowHtml([
+    { num: currentWeeklyStreak(workOnlyDates), label: 'Current Weekly Streak' },
+    { num: longestWeeklyStreak(workOnlyDates), label: 'Longest Weekly Streak' },
+    { num: weeksWithVisitInYear(workOnlyDates, thisYear), label: `Weeks With Temple Work (${thisYear})` },
+  ]);
+
+  document.getElementById('trend-body').innerHTML = visitsOverTimeHtml(_visits, _trendGranularity);
+  document.getElementById('most-visited-body').innerHTML = mostVisitedTemplesHtml(visits);
+  document.getElementById('purpose-body').innerHTML = purposeStatsHtml(visits);
+  document.getElementById('work-body').innerHTML = workStatsHtml(visits);
+  document.getElementById('combo-body').innerHTML = workCombinationsHtml(visits);
+  document.getElementById('people-body').innerHTML = peopleStatsHtml(visits);
+  document.getElementById('geo-body').innerHTML = geoStatsHtml(visits);
+
+  ['people-period', 'purpose-period', 'work-period', 'geo-period'].forEach(id => {
+    document.getElementById(id).textContent = periodLabel();
+  });
+}
+
+function renderPeriodTabs() {
+  document.getElementById('period-tabs').innerHTML = PERIODS.map(p =>
+    `<button type="button" class="${p.key === _period ? 'active' : ''}" data-period="${p.key}">${escapeHtml(p.label)}</button>`
+  ).join('');
+  document.querySelectorAll('#period-tabs button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      _period = btn.dataset.period;
+      renderPeriodTabs();
+      document.getElementById('custom-range-row').style.display = _period === 'custom' ? 'flex' : 'none';
+      if (_period !== 'custom') renderStats();
+    });
+  });
+}
+
+async function loadStats() {
+  const content = document.getElementById('content');
+  await initPage('stats.html');
+
+  try {
+    const [visitsRes, templesRes, peopleRes, vocab] = await Promise.all([
+      fetchData('visits'), fetchData('temples'), fetchData('people'), getVocab(),
+    ]);
+    _visits = visitsRes.visits || [];
+    _temples = templesRes.temples || [];
+    _people = peopleRes.people || [];
+    _vocab = vocab;
+
+    if (!_visits.length) {
+      content.innerHTML = emptyStateHtml('No temple visits have been recorded yet.',
+        'Statistics will show up here once you start logging Visits.',
+        `<p><a class="btn" href="visit-edit.html">Quick Log Your First Visit</a></p>`);
+      return;
+    }
+
+    content.innerHTML = `
+      <h2>Statistics</h2>
+
+      <div class="filter-bar">
+        <div class="view-tabs" id="period-tabs" style="margin:0"></div>
+      </div>
+      <div class="filter-bar" id="custom-range-row" style="display:none">
+        <label class="checkbox">From <input type="date" id="custom-from" style="width:auto"></label>
+        <label class="checkbox">To <input type="date" id="custom-to" style="width:auto"></label>
+        <button type="button" class="btn secondary" id="apply-custom">Apply</button>
+      </div>
+
+      <div id="summary-cards"></div>
+
+      <div class="stats-subgrid">
+        <div class="card stats-section">
+          <h3>Visit Streak</h3>
+          <div id="streak-cards"></div>
+        </div>
+        <div class="card stats-section">
+          <h3>Temple Work Streak</h3>
+          <div id="work-streak-cards"></div>
+        </div>
+      </div>
+
+      <div class="card stats-section">
+        <div class="detail-header">
+          <h3 style="margin:0">Visits Over Time</h3>
+          <div class="view-tabs" id="trend-tabs" style="margin:0"></div>
+        </div>
+        <div id="trend-body"></div>
+      </div>
+
+      <div class="stats-subgrid">
+        <div class="card stats-section">
+          <h3>Most Visited Temples</h3>
+          <div id="most-visited-body"></div>
+        </div>
+        <div class="card stats-section">
+          <h3>People (<span id="people-period"></span>)</h3>
+          <div id="people-body"></div>
+        </div>
+      </div>
+
+      <div class="stats-subgrid">
+        <div class="card stats-section">
+          <h3>Visit Purpose (<span id="purpose-period"></span>)</h3>
+          <div id="purpose-body"></div>
+        </div>
+        <div class="card stats-section">
+          <h3>Work Performed (<span id="work-period"></span>)</h3>
+          <div id="work-body"></div>
+          <h4 style="margin-top:1rem">Common Combinations</h4>
+          <div id="combo-body"></div>
+        </div>
+      </div>
+
+      <div class="card stats-section">
+        <h3>Geographic (<span id="geo-period"></span>)</h3>
+        <div id="geo-body"></div>
+      </div>
+    `;
+
+    renderPeriodTabs();
+
+    document.getElementById('apply-custom').addEventListener('click', () => {
+      _customFrom = document.getElementById('custom-from').value;
+      _customTo = document.getElementById('custom-to').value;
+      renderStats();
+    });
+
+    document.getElementById('trend-tabs').innerHTML = ['month', 'quarter', 'year'].map(g =>
+      `<button type="button" class="${g === _trendGranularity ? 'active' : ''}" data-g="${g}">${g[0].toUpperCase() + g.slice(1)}</button>`
+    ).join('');
+    document.querySelectorAll('#trend-tabs button').forEach(btn => {
+      btn.addEventListener('click', () => {
+        _trendGranularity = btn.dataset.g;
+        document.querySelectorAll('#trend-tabs button').forEach(b => b.classList.toggle('active', b === btn));
+        document.getElementById('trend-body').innerHTML = visitsOverTimeHtml(_visits, _trendGranularity);
+      });
+    });
+
+    renderStats();
+  } catch (err) {
+    handleError(content, err);
+  }
+}
+loadStats();
+</script>
+</body>
+</html>
