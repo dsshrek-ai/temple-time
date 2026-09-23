@@ -117,15 +117,31 @@ async function generateMemoryBook({ visits, allPhotos, title, subtitle }) {
     (photosByVisit[p.VisitId] = photosByVisit[p.VisitId] || []).push(p);
   });
 
+  // The Visit history starts on its own page after the title page; after
+  // that, entries flow continuously rather than forcing a page break per
+  // Visit -- a short entry no longer leaves the rest of the page empty. A
+  // rule line separates consecutive entries that land on the same page;
+  // ensureSpace() still starts a fresh page on its own once one is needed.
+  doc.addPage();
+  y = BOOK_MARGIN;
+
   const sorted = visits.slice().sort((a, b) => a.VisitDate.localeCompare(b.VisitDate));
 
-  for (const v of sorted) {
-    doc.addPage();
-    y = BOOK_MARGIN;
+  for (let i = 0; i < sorted.length; i++) {
+    const v = sorted[i];
+
+    if (i > 0) {
+      ensureSpace(30);
+      doc.setDrawColor(205, 195, 175);
+      doc.setLineWidth(0.75);
+      doc.line(BOOK_MARGIN, y, pageWidth - BOOK_MARGIN, y);
+      y += 20;
+    }
+    ensureSpace(90); // room for the heading + date line + first meta line, so a lone heading doesn't get orphaned at a page's bottom
 
     addText(v.TempleName, { size: 18, style: 'bold', color: [95, 74, 38], gapAfter: 4 });
     const loc = [v.TempleCity, v.TempleState].filter(Boolean).join(', ');
-    addText(`${formatDate(v.VisitDate)}${loc ? ' · ' + loc : ''}${v.FavoriteVisit ? '  ★' : ''}`, { size: 11, color: [110, 105, 95], gapAfter: 10 });
+    addText(`${formatDate(v.VisitDate)}${loc ? ' · ' + loc : ''}${v.FavoriteVisit ? '  ★' : ''}`, { size: 11, style: 'italic', color: [110, 105, 95], gapAfter: 10 });
 
     const metaBits = [];
     if ((v.WhoWith || []).length) metaBits.push(`Who With: ${v.WhoWith.map(p => p.Name).join(', ')}`);
