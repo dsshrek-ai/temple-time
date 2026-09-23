@@ -91,6 +91,7 @@ async function submitAddTemple(ev) {
     shortName: document.getElementById('t-shortname').value.trim(),
     status: document.getElementById('t-status').value,
     streetAddress: document.getElementById('t-street').value.trim(),
+    addressLine2: document.getElementById('t-line2').value.trim(),
     city: document.getElementById('t-city').value.trim(),
     stateRegion: document.getElementById('t-state').value.trim(),
     postalCode: document.getElementById('t-postal').value.trim(),
@@ -99,6 +100,7 @@ async function submitAddTemple(ev) {
     longitude: document.getElementById('t-lng').value.trim(),
     website: document.getElementById('t-website').value.trim(),
     phone: document.getElementById('t-phone').value.trim(),
+    notes: document.getElementById('t-notes').value.trim(),
     favorite: document.getElementById('t-favorite').checked,
     onVisitList: document.getElementById('t-visitlist').checked,
   };
@@ -132,21 +134,26 @@ async function loadTemples() {
         <select id="t-status">${(vocab.statuses || []).map(s => `<option value="${escapeHtml(s)}"${s === 'Operating' ? ' selected' : ''}>${escapeHtml(s)}</option>`).join('')}</select>
         <div class="form-row">
           <div><label for="t-street">Street Address</label><input id="t-street"></div>
+          <div><label for="t-line2">Address Line 2</label><input id="t-line2"></div>
+        </div>
+        <div class="form-row">
           <div><label for="t-city">City</label><input id="t-city"></div>
-        </div>
-        <div class="form-row">
           <div><label for="t-state">State / Region</label><input id="t-state"></div>
-          <div><label for="t-postal">Postal Code</label><input id="t-postal"></div>
         </div>
         <div class="form-row">
+          <div><label for="t-postal">Postal Code</label><input id="t-postal"></div>
           <div><label for="t-country">Country</label><input id="t-country"></div>
-          <div><label for="t-website">Website</label><input id="t-website" type="url"></div>
         </div>
-        <label for="t-phone">Phone Number</label><input id="t-phone" type="tel">
+        <div class="form-row">
+          <div><label for="t-website">Website</label><input id="t-website" type="url"></div>
+          <div><label for="t-phone">Phone Number</label><input id="t-phone" type="tel"></div>
+        </div>
         <div class="form-row">
           <div><label for="t-lat">Latitude</label><input id="t-lat" type="number" step="any"></div>
           <div><label for="t-lng">Longitude</label><input id="t-lng" type="number" step="any"></div>
         </div>
+        <label for="t-notes">Notes</label>
+        <textarea id="t-notes" rows="3" placeholder="Parking, entrance, accessibility notes..."></textarea>
         <p>
           <label class="checkbox"><input type="checkbox" id="t-favorite"> Favorite</label>
           <label class="checkbox"><input type="checkbox" id="t-visitlist"> Add to My Visit List</label>
