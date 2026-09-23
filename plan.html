@@ -25,6 +25,25 @@
 <script>
 let _plan = null;
 
+// Always send the full field set -- updatePlan overwrites the whole row,
+// so a partial payload here would silently drop Purposes/Work/Who With/
+// Notes on a quick toggle (same class of bug fixed on the Temple page's
+// Favorite/Visit List toggles).
+function planUpdatePayload(overrides) {
+  const p = _plan;
+  return Object.assign({
+    id: p.Id, templeId: p.TempleId, plannedDate: p.PlannedDate, plannedTime: p.PlannedTime || '',
+    endTime: p.EndTime || '', groupName: p.GroupName || '', notes: p.Notes || '',
+    personIds: (p.WhoWith || []).map(x => x.Id), purposes: p.Purposes || [], workPerformed: p.WorkPerformed || [],
+    appointmentScheduled: p.AppointmentScheduled,
+  }, overrides);
+}
+
+async function toggleAppointmentScheduled() {
+  await postAction('updatePlan', planUpdatePayload({ appointmentScheduled: !_plan.AppointmentScheduled }));
+  loadPlan();
+}
+
 async function cancelPlan() {
   if (!confirm('Cancel this Plan? It stays in your history as Cancelled.')) return;
   await postAction('cancelPlan', { id: _plan.Id });
@@ -65,13 +84,18 @@ async function loadPlan() {
           <div>
             <h2 style="margin-bottom:0.2rem">${escapeHtml(p.TempleName)}</h2>
             <p class="meta">${escapeHtml(addr)}</p>
-            ${p.Status !== 'Planned' ? `<p class="meta">${escapeHtml(p.Status)}</p>` : ''}
+            <p class="meta">
+              ${p.Status !== 'Planned' ? escapeHtml(p.Status) + ' · ' : ''}${p.AppointmentScheduled
+                ? '<span class="meta badges">✓ Appointment Scheduled</span>'
+                : (isPlanned ? '<strong style="color:#a33">⚠ Appointment Not Yet Scheduled</strong>' : 'Appointment not scheduled')}
+            </p>
           </div>
         </div>
         <div class="detail-actions">
           <a class="btn secondary" href="${mapsUrl(planTempleForMaps(p))}" target="_blank" rel="noopener">Navigate</a>
-          <a class="btn secondary" href="${googleCalendarUrl(p)}" target="_blank" rel="noopener">Add to Google Calendar</a>
+          <a class="btn secondary" href="${calendarEventUrl(p)}">Add to Calendar</a>
           ${isPlanned ? `<a class="btn" href="visit-edit.html?fromPlan=${p.Id}">Log This Visit</a>` : ''}
+          ${isPlanned ? `<button type="button" class="btn secondary" onclick="toggleAppointmentScheduled()">${p.AppointmentScheduled ? 'Mark Not Scheduled' : 'Mark Appointment Scheduled'}</button>` : ''}
           ${isPlanned ? `<button type="button" class="btn secondary" onclick="openEditForm()">Edit Plan</button>` : ''}
           ${isPlanned ? `<button type="button" class="btn secondary" onclick="cancelPlan()">Cancel Plan</button>` : ''}
           <button type="button" class="btn secondary" onclick="deletePlan()">Delete Plan</button>
@@ -133,6 +157,7 @@ async function openEditForm() {
         `).join('')}</div>
         <label for="e-notes">Notes</label>
         <textarea id="e-notes" rows="3">${escapeHtml(p.Notes || '')}</textarea>
+        <p><label class="checkbox"><input type="checkbox" id="e-scheduled" ${p.AppointmentScheduled ? 'checked' : ''}> Appointment Scheduled with the temple</label></p>
         <div id="edit-msg"></div>
         <div class="form-actions">
           <button type="submit" class="btn">Save Changes</button>
@@ -158,6 +183,7 @@ async function openEditForm() {
       personIds: Array.from(document.querySelectorAll('input[name="e-who"]:checked')).map(cb => Number(cb.value)),
       purposes: Array.from(document.querySelectorAll('input[name="e-purpose"]:checked')).map(cb => cb.value),
       workPerformed: Array.from(document.querySelectorAll('input[name="e-work"]:checked')).map(cb => cb.value),
+      appointmentScheduled: document.getElementById('e-scheduled').checked,
     };
     try {
       await postAction('updatePlan', payload);

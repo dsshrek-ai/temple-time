@@ -46,6 +46,7 @@ async function submitForm(ev) {
     personIds: Array.from(document.querySelectorAll('input[name="whowith"]:checked')).map(cb => Number(cb.value)),
     purposes: Array.from(document.querySelectorAll('input[name="purpose"]:checked')).map(cb => cb.value),
     workPerformed: Array.from(document.querySelectorAll('input[name="work"]:checked')).map(cb => cb.value),
+    appointmentScheduled: document.getElementById('pl-scheduled').checked,
   };
 
   try {
@@ -110,6 +111,8 @@ async function loadForm() {
 
         <label for="pl-notes">Notes</label>
         <textarea id="pl-notes" rows="2" placeholder="Meet at our house at 8:30, dinner afterward..."></textarea>
+
+        <p><label class="checkbox"><input type="checkbox" id="pl-scheduled"> Appointment Scheduled with the temple</label></p>
 
         <div id="form-msg"></div>
         <div class="form-actions">

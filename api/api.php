@@ -628,6 +628,7 @@ function plansForUser(int $userId): array {
       'GroupName' => $r['group_name'],
       'Notes' => $r['notes'],
       'Status' => $r['status'],
+      'AppointmentScheduled' => (bool)$r['appointment_scheduled'],
       'Purposes' => [],
       'WorkPerformed' => [],
       'WhoWith' => [],
@@ -688,25 +689,26 @@ function savePlan(int $userId, array $p, ?int $id): int {
   $endTime = nullIfBlank((string)($p['endTime'] ?? ''));
   $group = nullIfBlank((string)($p['groupName'] ?? ''));
   $notes = nullIfBlank((string)($p['notes'] ?? ''));
+  $appointmentScheduled = !empty($p['appointmentScheduled']) ? 1 : 0;
 
   $conn = db();
   $conn->begin_transaction();
   try {
     if ($id === null) {
       $stmt = $conn->prepare(
-        'INSERT INTO tt_plans (user_id, temple_id, planned_date, planned_time, end_time, group_name, notes, status)
-         VALUES (?,?,?,?,?,?,?,\'Planned\')'
+        'INSERT INTO tt_plans (user_id, temple_id, planned_date, planned_time, end_time, group_name, notes, status, appointment_scheduled)
+         VALUES (?,?,?,?,?,?,?,\'Planned\',?)'
       );
-      $stmt->bind_param('iisssss', $userId, $templeId, $date, $time, $endTime, $group, $notes);
+      $stmt->bind_param('iisssssi', $userId, $templeId, $date, $time, $endTime, $group, $notes, $appointmentScheduled);
       $stmt->execute();
       $id = $stmt->insert_id;
       $stmt->close();
     } else {
       $stmt = $conn->prepare(
-        'UPDATE tt_plans SET temple_id=?, planned_date=?, planned_time=?, end_time=?, group_name=?, notes=?
+        'UPDATE tt_plans SET temple_id=?, planned_date=?, planned_time=?, end_time=?, group_name=?, notes=?, appointment_scheduled=?
          WHERE id=? AND user_id=?'
       );
-      $stmt->bind_param('isssssii', $templeId, $date, $time, $endTime, $group, $notes, $id, $userId);
+      $stmt->bind_param('isssssiii', $templeId, $date, $time, $endTime, $group, $notes, $appointmentScheduled, $id, $userId);
       $stmt->execute();
       $stmt->close();
     }

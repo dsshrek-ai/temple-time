@@ -273,6 +273,15 @@ CREATE TABLE IF NOT EXISTS tt_plan_people (
 ALTER TABLE tt_visits ADD COLUMN plan_id INT NULL,
   ADD CONSTRAINT fk_tt_visits_plan FOREIGN KEY (plan_id) REFERENCES tt_plans(id) ON DELETE SET NULL;
 
+-- ---------- PHASE 3 ADDENDUM: Appointment Scheduled flag on Plans ----------
+-- Run once against an existing Phase 3 database (safe to include in a
+-- fresh run too -- it just runs after the tt_plans CREATE TABLE above).
+-- Tracks whether the user has actually called/booked the temple
+-- appointment for a Plan -- separate from Plan Status (Planned/Completed/
+-- Cancelled), since a Plan can be Planned but not yet scheduled with the
+-- temple.
+ALTER TABLE tt_plans ADD COLUMN appointment_scheduled TINYINT(1) NOT NULL DEFAULT 0;
+
 -- ============================================================
 -- BOOTSTRAP (run once, after you've signed up through My Apps Hub):
 --

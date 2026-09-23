@@ -74,9 +74,10 @@ async function loadDashboard() {
           <h3 style="margin-bottom:0.2rem">${escapeHtml(next.TempleName)}</h3>
           <p class="meta">${escapeHtml(when)}</p>
           ${bits.length ? `<p class="meta">${escapeHtml(bits.join(' · '))}</p>` : ''}
+          <p class="meta">${next.AppointmentScheduled ? '✓ Appointment Scheduled' : '<strong style="color:#a33">⚠ Appointment Not Yet Scheduled</strong>'}</p>
           <div class="detail-actions">
             <a class="btn secondary" href="${mapsUrl(planTempleForMaps(next))}" target="_blank" rel="noopener">Navigate</a>
-            <a class="btn secondary" href="${googleCalendarUrl(next)}" target="_blank" rel="noopener">Calendar</a>
+            <a class="btn secondary" href="${calendarEventUrl(next)}">Calendar</a>
             <a class="btn" href="visit-edit.html?fromPlan=${next.Id}">Log Visit</a>
           </div>
         </div>

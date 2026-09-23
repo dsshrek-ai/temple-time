@@ -155,7 +155,11 @@ function planCardHtml(p) {
         <p class="title">${escapeHtml(p.TempleName)}</p>
         <p class="meta">${escapeHtml(when)}${loc ? ' · ' + escapeHtml(loc) : ''}</p>
         <p class="meta">${escapeHtml(bits.join(' · '))}${work ? ` <span class="work-shorthand">${escapeHtml(work)}</span>` : ''}</p>
-        ${p.Status !== 'Planned' ? `<p class="meta badges">${escapeHtml(p.Status)}</p>` : ''}
+        ${p.Status !== 'Planned'
+          ? `<p class="meta badges">${escapeHtml(p.Status)}</p>`
+          : (p.AppointmentScheduled
+              ? `<p class="meta badges">✓ Scheduled</p>`
+              : `<p class="meta" style="color:#a33"><strong>⚠ Not Yet Scheduled</strong></p>`)}
       </div>
     </a>`;
 }
@@ -171,31 +175,50 @@ function planTempleForMaps(p) {
   };
 }
 
-// ---- Google Calendar (quick-add link, no OAuth -- see TempleTime.md 11.3
-// and the Phase 3 decision to start simple) ----
+// ---- Add to Calendar (.ics data URL, no OAuth) ----
 //
-// Dates are built as "floating" local time (no trailing Z), which Google
-// Calendar's quick-add endpoint interprets in the viewer's own calendar
-// timezone. That's the right behavior here since Temple Time doesn't track
-// a timezone for any Temple -- Planned Time was entered as a plain local
-// time in the first place.
-function googleCalendarUrl(plan) {
+// Originally this built a Google Calendar "quick add" web URL
+// (calendar.google.com/calendar/render?action=TEMPLATE&...). That works in
+// a desktop browser, but on a phone with the Google Calendar app installed,
+// iOS/Android intercepts the link via Universal Links and hands it to the
+// native app -- which does not understand the web-only "action=TEMPLATE"
+// query scheme, so it just opens to today's view with nothing filled in.
+// A standard .ics (RFC 5545) file sidesteps that entirely: it's a generic
+// file format every calendar app (Google, Apple, Outlook) already knows
+// how to import, so there's no app-specific link-handling to fight. Still
+// requires one manual tap to confirm the add -- no URL scheme can silently
+// write to someone's calendar without that; true no-tap auto-creation
+// needs the full Calendar API with OAuth (deliberately deferred, see
+// TempleTime.md 11.3).
+//
+// Dates are floating local time (no TZID/Z), matching how Planned Time was
+// entered -- Temple Time doesn't track a timezone for any Temple.
+// UID is stable per Plan (plan-<id>@temple-time) so re-adding after
+// editing a Plan updates the same calendar event in apps that dedupe by
+// UID, rather than creating a duplicate.
+
+function icsEscape(s) {
+  return String(s).replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\n/g, '\\n');
+}
+
+function calendarEventUrl(plan) {
   const pad = n => String(n).padStart(2, '0');
   const [y, m, d] = plan.PlannedDate.split('-').map(Number);
-  let startStr, endStr;
+  let dtStart, dtEnd, allDay = false;
   if (plan.PlannedTime) {
     const [sh, sm] = plan.PlannedTime.split(':').map(Number);
-    startStr = `${y}${pad(m)}${pad(d)}T${pad(sh)}${pad(sm)}00`;
+    dtStart = `${y}${pad(m)}${pad(d)}T${pad(sh)}${pad(sm)}00`;
     let eh = sh + 2, em = sm; // default duration when no End Time was given
     if (plan.EndTime) { [eh, em] = plan.EndTime.split(':').map(Number); }
-    endStr = `${y}${pad(m)}${pad(d)}T${pad(eh)}${pad(em)}00`;
+    dtEnd = `${y}${pad(m)}${pad(d)}T${pad(eh)}${pad(em)}00`;
   } else {
-    // All-day event -- Google's end date is exclusive, so use the next day.
+    // All-day event -- DTEND is exclusive, so use the next day.
+    allDay = true;
     const start = new Date(y, m - 1, d);
     const end = new Date(y, m - 1, d + 1);
     const fmt = dt => `${dt.getFullYear()}${pad(dt.getMonth() + 1)}${pad(dt.getDate())}`;
-    startStr = fmt(start);
-    endStr = fmt(end);
+    dtStart = fmt(start);
+    dtEnd = fmt(end);
   }
 
   const details = [];
@@ -208,14 +231,26 @@ function googleCalendarUrl(plan) {
   const addr = [plan.TempleStreetAddress, plan.TempleCity, plan.TempleState, plan.TemplePostalCode, plan.TempleCountry]
     .filter(Boolean).join(', ');
 
-  const params = new URLSearchParams({
-    action: 'TEMPLATE',
-    text: `Temple — ${plan.TempleName}`,
-    dates: `${startStr}/${endStr}`,
-    details: details.join('\n'),
-    location: addr,
-  });
-  return `https://calendar.google.com/calendar/render?${params.toString()}`;
+  const now = new Date();
+  const dtStamp = `${now.getUTCFullYear()}${pad(now.getUTCMonth() + 1)}${pad(now.getUTCDate())}T`
+    + `${pad(now.getUTCHours())}${pad(now.getUTCMinutes())}${pad(now.getUTCSeconds())}Z`;
+
+  const lines = [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//Temple Time//EN',
+    'BEGIN:VEVENT',
+    `UID:plan-${plan.Id}@temple-time`,
+    `DTSTAMP:${dtStamp}`,
+    allDay ? `DTSTART;VALUE=DATE:${dtStart}` : `DTSTART:${dtStart}`,
+    allDay ? `DTEND;VALUE=DATE:${dtEnd}` : `DTEND:${dtEnd}`,
+    `SUMMARY:${icsEscape('Temple — ' + plan.TempleName)}`,
+    `DESCRIPTION:${icsEscape(details.join('\n'))}`,
+    `LOCATION:${icsEscape(addr)}`,
+    'END:VEVENT',
+    'END:VCALENDAR',
+  ];
+  return 'data:text/calendar;charset=utf-8,' + encodeURIComponent(lines.join('\r\n'));
 }
 
 function statRowHtml(stats) {
