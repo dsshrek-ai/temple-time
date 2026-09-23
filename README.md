@@ -28,11 +28,10 @@ person's Temples/Visits/People/Plans/Photos stay private to them.
       nullable `plan_id` on `tt_visits`. `plans.html` (Upcoming/This Week/
       This Month/All/Completed/Cancelled views), `plan.html` (detail +
       inline edit), `plan-edit.html` (create). Navigate (Google Maps) and
-      **Add to Calendar** (downloads a generic `.ics` file via `Blob`, no
-      OAuth -- see the Phase 3 decision in `TempleTime.md` 11.3, and the
-      "Known Phase 3 simplifications" note below for why it went through
-      two other approaches first) on every Plan, plus an **Appointment
-      Scheduled** flag
+      **Add to Google Calendar** (quick-add link, no OAuth -- see the
+      Phase 3 decision in `TempleTime.md` 11.3, and the "Known Phase 3
+      simplifications" note below for the debugging story behind it) on
+      every Plan, plus an **Appointment Scheduled** flag
       (separate from Plan Status) so a Plan can be flagged as not yet
       booked with the temple. **Log This Visit** reuses `visit-edit.html`
       (`?fromPlan=<id>`), carrying forward Temple/Planned Date/Who With/
@@ -110,23 +109,28 @@ to matter:
   Visit); if that turns out to be the wrong call for how ordinance work
   actually gets planned vs. performed, it's a one-line change in
   `visit-edit.html`'s `fromPlan` branch.
-- "Add to Calendar" downloads an `.ics` file (via `downloadCalendarEvent()`
-  in `js/app.js`), it isn't a live sync -- editing or cancelling a Plan
-  after adding it to your calendar does not update or remove that calendar
-  event (you'd re-add it, or edit/delete it directly in your calendar
-  app). The `.ics`'s UID is stable per Plan, so re-adding after an edit
-  updates the same event rather than duplicating it in calendar apps that
-  dedupe by UID -- not all of them do. Full Calendar API integration
-  (OAuth, live create/update/delete) was deliberately deferred; see the
-  decision recorded in `TempleTime.md` 11.3.
-- This feature has gone through two dead ends before landing on the
-  current approach -- see the comment above `buildIcsText` in `js/app.js`
-  for the full history: (1) a Google-specific quick-add web URL, killed by
-  the Google Calendar mobile app intercepting it via Universal Links and
-  ignoring the prefill params; (2) a `.ics` file as a `data:text/calendar`
-  URI on a plain link, killed by recent iOS Safari blocking top-level
-  navigation to `data:` URIs outright. Current: a `Blob` + programmatic
-  `download`-attributed link click, which isn't subject to either
-  restriction -- the tradeoff is it saves the file (to Downloads / Files on
-  iOS) rather than jumping straight to an "Add Event" screen, so there's
-  one extra tap to open the saved file and import it.
+- "Add to Google Calendar" is a quick-add link, not a live sync -- editing
+  or cancelling a Plan after adding it to your calendar does not update or
+  remove that calendar event. Full Calendar API integration (OAuth, live
+  create/update/delete) was deliberately deferred; see the decision
+  recorded in `TempleTime.md` 11.3.
+- This feature went down two dead ends before landing back on the plain
+  quick-add link it started with -- see the comment above
+  `calendarEventUrl` in `js/app.js` for the full story. Short version: a
+  report that the link "opened Google Calendar but created nothing" was
+  wrongly diagnosed as the Google Calendar mobile app intercepting the
+  link via Universal Links, which led to two rebuilds of the mechanism
+  itself (a `data:` URI `.ics` file, then a `Blob`-downloaded `.ics`
+  file) -- neither actually fixed it, and the second attempt introduced
+  its own new failure (iOS Safari blocking `data:`-URI navigation). Only
+  after comparing against `life-tempo`'s `gcalUrl()`, which uses this
+  exact same plain link and works fine on the same device, did the real
+  bug surface: the default-duration fallback (when a Plan has a Planned
+  Time but no End Time) computed the end hour as plain `startHour + 2`
+  with no overflow handling, so a late-evening Plan produced an invalid
+  hour like "24" or "25" in the `dates` param -- which Google Calendar
+  silently ignores rather than erroring, showing today's view with
+  nothing filled in. Fixed by doing real `Date`-object arithmetic instead
+  (matching Life Tempo's approach), which correctly rolls hour overflow
+  into the next day. Lesson: when a working reference implementation
+  exists elsewhere, diff against it before inventing a new theory.

@@ -181,62 +181,61 @@ function planTempleForMaps(p) {
   };
 }
 
-// ---- Add to Calendar (.ics file, downloaded via Blob, no OAuth) ----
+// ---- Add to Google Calendar (quick-add link, no OAuth) ----
 //
-// History of this feature, because it's gone through two failed approaches:
+// This has been through two wrong turns before landing here -- worth
+// recording so a future "let's just try X" doesn't re-walk them:
 //
-// 1. Google Calendar "quick add" web URL
-//    (calendar.google.com/calendar/render?action=TEMPLATE&...). Works in a
-//    desktop browser, but on a phone with the Google Calendar app
-//    installed, iOS/Android intercepts the link via Universal Links and
-//    hands it to the native app -- which does not understand the web-only
-//    "action=TEMPLATE" query scheme, so it opened to today's view with
-//    nothing filled in.
-// 2. A generic .ics file as a `data:text/calendar,...` URL on a plain
-//    <a href>. Sidesteps the Google-app-interception problem, but recent
-//    iOS Safari blocks top-level navigation to `data:` URIs outright for
-//    security -- tapping the link just silently cancels (reported as "it
-//    blinks and does nothing").
+// 1. Original: this same plain quick-add URL. Reported as producing no
+//    event ("opens to today's view, nothing pre-filled"). Assumed to be
+//    iOS/Android intercepting the calendar.google.com link via the Google
+//    Calendar app (Universal Links) and not understanding the web-only
+//    "action=TEMPLATE" query scheme.
+// 2. Switched to a generic .ics file, first as a `data:text/calendar,...`
+//    URI, then (when recent iOS Safari turned out to block top-level
+//    data:-URI navigation outright) as a Blob downloaded via a
+//    `download`-attributed link click.
 //
-// Current approach: build the same .ics text, but hand it to the browser
-// as a Blob object URL via a programmatic, `download`-attributed <a> click
-// (downloadCalendarEvent()) instead of a static href. This is the standard
-// "trigger a file save" pattern and isn't subject to the data:-URI
-// navigation block. The cost is one extra tap versus the ideal: it saves
-// the .ics file (to Downloads / the Files app on iOS) rather than jumping
-// straight to an "Add Event" screen, so the user opens that saved file
-// once to import it. True zero-tap auto-creation needs the full Calendar
-// API with OAuth (deliberately deferred, see TempleTime.md 11.3).
+// Both replacements were solving the wrong problem. Comparing against
+// Life Tempo (life-tempo/js/api.js gcalUrl()), which uses this exact same
+// plain quick-add link and works fine on the same device, proved the link
+// mechanism itself was never the issue. The real bug: the default-duration
+// fallback below used to compute the end hour as plain `startHour + 2`
+// with no rollover handling -- for a Plan starting at, say, 10pm with no
+// End Time set, that produced an invalid hour like "24" or "25" in the
+// `dates` param, which Google Calendar silently ignores rather than
+// erroring, showing today's view with nothing filled in. Fixed by doing
+// real Date-object arithmetic (start.getTime() + durationMs) instead,
+// matching how Life Tempo's gcalUrl() computes its default end time --
+// Date math correctly rolls hour overflow into the next day.
 //
-// Dates are floating local time (no TZID/Z), matching how Planned Time was
-// entered -- Temple Time doesn't track a timezone for any Temple.
-// UID is stable per Plan (plan-<id>@temple-time) so re-adding after
-// editing a Plan updates the same calendar event in apps that dedupe by
-// UID, rather than creating a duplicate.
+// Dates are floating local time (no timezone suffix), matching how
+// Planned Time was entered -- Temple Time doesn't track a timezone for
+// any Temple.
 
-function icsEscape(s) {
-  return String(s).replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\n/g, '\\n');
-}
-
-function buildIcsText(plan) {
-  const pad = n => String(n).padStart(2, '0');
+function calendarEventUrl(plan) {
   const [y, m, d] = plan.PlannedDate.split('-').map(Number);
-  let dtStart, dtEnd, allDay = false;
+  let start, end, allDay = false;
   if (plan.PlannedTime) {
     const [sh, sm] = plan.PlannedTime.split(':').map(Number);
-    dtStart = `${y}${pad(m)}${pad(d)}T${pad(sh)}${pad(sm)}00`;
-    let eh = sh + 2, em = sm; // default duration when no End Time was given
-    if (plan.EndTime) { [eh, em] = plan.EndTime.split(':').map(Number); }
-    dtEnd = `${y}${pad(m)}${pad(d)}T${pad(eh)}${pad(em)}00`;
+    start = new Date(y, m - 1, d, sh, sm, 0);
+    if (plan.EndTime) {
+      const [eh, em] = plan.EndTime.split(':').map(Number);
+      end = new Date(y, m - 1, d, eh, em, 0);
+    } else {
+      end = new Date(start.getTime() + 2 * 60 * 60 * 1000); // default 2-hour duration
+    }
   } else {
-    // All-day event -- DTEND is exclusive, so use the next day.
+    // All-day event -- Google's end date is exclusive, so use the next day.
     allDay = true;
-    const start = new Date(y, m - 1, d);
-    const end = new Date(y, m - 1, d + 1);
-    const fmt = dt => `${dt.getFullYear()}${pad(dt.getMonth() + 1)}${pad(dt.getDate())}`;
-    dtStart = fmt(start);
-    dtEnd = fmt(end);
+    start = new Date(y, m - 1, d);
+    end = new Date(y, m - 1, d + 1);
   }
+
+  const pad = n => String(n).padStart(2, '0');
+  const fmtDate = dt => `${dt.getFullYear()}${pad(dt.getMonth() + 1)}${pad(dt.getDate())}`;
+  const fmtDateTime = dt => `${fmtDate(dt)}T${pad(dt.getHours())}${pad(dt.getMinutes())}00`;
+  const dates = allDay ? `${fmtDate(start)}/${fmtDate(end)}` : `${fmtDateTime(start)}/${fmtDateTime(end)}`;
 
   const details = [];
   details.push(`Temple: ${plan.TempleName}`);
@@ -248,38 +247,10 @@ function buildIcsText(plan) {
   const addr = [plan.TempleStreetAddress, plan.TempleCity, plan.TempleState, plan.TemplePostalCode, plan.TempleCountry]
     .filter(Boolean).join(', ');
 
-  const now = new Date();
-  const dtStamp = `${now.getUTCFullYear()}${pad(now.getUTCMonth() + 1)}${pad(now.getUTCDate())}T`
-    + `${pad(now.getUTCHours())}${pad(now.getUTCMinutes())}${pad(now.getUTCSeconds())}Z`;
-
-  const lines = [
-    'BEGIN:VCALENDAR',
-    'VERSION:2.0',
-    'PRODID:-//Temple Time//EN',
-    'BEGIN:VEVENT',
-    `UID:plan-${plan.Id}@temple-time`,
-    `DTSTAMP:${dtStamp}`,
-    allDay ? `DTSTART;VALUE=DATE:${dtStart}` : `DTSTART:${dtStart}`,
-    allDay ? `DTEND;VALUE=DATE:${dtEnd}` : `DTEND:${dtEnd}`,
-    `SUMMARY:${icsEscape('Temple — ' + plan.TempleName)}`,
-    `DESCRIPTION:${icsEscape(details.join('\n'))}`,
-    `LOCATION:${icsEscape(addr)}`,
-    'END:VEVENT',
-    'END:VCALENDAR',
-  ];
-  return lines.join('\r\n');
-}
-
-function downloadCalendarEvent(plan) {
-  const blob = new Blob([buildIcsText(plan)], { type: 'text/calendar;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `temple-visit-${plan.Id}.ics`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(url), 10000);
+  const params = new URLSearchParams({ action: 'TEMPLATE', text: `Temple - ${plan.TempleName}`, dates });
+  if (addr) params.set('location', addr);
+  if (details.length) params.set('details', details.join('\n'));
+  return `https://calendar.google.com/calendar/render?${params.toString()}`;
 }
 
 function statRowHtml(stats) {

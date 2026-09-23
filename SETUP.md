@@ -85,17 +85,16 @@ WHERE u.username = 'you@example.com' AND a.app_key = 'temple-time';
    `visitsForUser` now reference `tt_visits.plan_id` and several pages call
    the new `plans` action.
 2. Re-upload `api/api.php` by FTP. No new `config.php` values needed --
-   Add to Calendar builds a client-side `.ics` file link and Google Maps
-   just builds a URL, so there's nothing to configure server-side.
+   Add to Google Calendar builds a client-side quick-add URL and Google
+   Maps just builds a URL, so there's nothing to configure server-side.
 
-## 6.1. Phase 3 addendum: Appointment Scheduled flag + Calendar link fix
+## 6.1. Phase 3 addendum: Appointment Scheduled flag
 
 1. Run the "PHASE 3 ADDENDUM: Appointment Scheduled flag on Plans" section
    of `api/schema.sql` in phpMyAdmin (adds `tt_plans.appointment_scheduled`).
    Same ordering rule -- run before re-uploading `api.php`.
 2. Re-upload `api/api.php` by FTP.
-3. No action needed for the Calendar link fix itself (switched from a
-   Google-specific quick-add URL to a generic `.ics` file link) -- it's
+3. No server action needed for the Add to Google Calendar date-math fix --
    pure front-end, live as soon as you push to GitHub and Pages redeploys.
 
 ## Re-deploying after a change

@@ -93,7 +93,7 @@ async function loadPlan() {
         </div>
         <div class="detail-actions">
           <a class="btn secondary" href="${mapsUrl(planTempleForMaps(p))}" target="_blank" rel="noopener">Navigate</a>
-          <button type="button" class="btn secondary" onclick="downloadCalendarEvent(_plan)">Add to Calendar</button>
+          <a class="btn secondary" href="${calendarEventUrl(p)}" target="_blank" rel="noopener">Add to Google Calendar</a>
           ${isPlanned ? `<a class="btn" href="visit-edit.html?fromPlan=${p.Id}">Log This Visit</a>` : ''}
           ${isPlanned ? `<button type="button" class="btn secondary" onclick="toggleAppointmentScheduled()">${p.AppointmentScheduled ? 'Mark Not Scheduled' : 'Mark Appointment Scheduled'}</button>` : ''}
           ${isPlanned ? `<button type="button" class="btn secondary" onclick="openEditForm()">Edit Plan</button>` : ''}
