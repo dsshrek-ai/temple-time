@@ -54,6 +54,28 @@ WHERE u.username = 'you@example.com' AND a.app_key = 'temple-time';
 3. Open the app from My Apps Hub -- it hands off a session token
    (`?token=...`) so you're logged in automatically.
 
+## 5. Phase 2: enable Photo uploads
+
+1. Run the "PHASE 2: PHOTOS" section of `api/schema.sql` in phpMyAdmin
+   (adds `tt_photos` + two join tables, and two `ALTER TABLE`s on
+   `tt_temples`/`tt_visits`). **Do this before uploading the Phase-2
+   `api.php`** -- the updated `templesForUser`/`visitsForUser` queries
+   reference the new `primary_photo_id`/`cover_photo_id` columns, so
+   uploading the new API code against an un-migrated database breaks
+   *everything*, not just Photos (Temples/Visits screens fail to load
+   too). If you ever do them out of order by accident, running the SQL
+   fixes it immediately -- no re-upload needed.
+2. Create a folder via FTP/File Manager for uploaded photos, e.g.
+   `seniorfamily.org/temple-time-photos/`, and make sure PHP can write to
+   it (typical shared-host default permissions are fine).
+3. In `api/config.php`, set `PHOTO_UPLOAD_DIR` to that folder's server
+   filesystem path (e.g. `/home/ACCOUNT/public_html/temple-time-photos`)
+   and `PHOTO_BASE_URL` to its public URL (e.g.
+   `https://seniorfamily.org/temple-time-photos`). Leaving either blank
+   disables uploads -- `addPhoto` fails with a clear "not configured"
+   message instead of a crash.
+4. Re-upload `api/api.php` and `api/config.php` by FTP.
+
 ## Re-deploying after a change
 
 - Front end (`index.html`, `style.css`, `js/*.js`): push to GitHub, Pages
@@ -61,4 +83,7 @@ WHERE u.username = 'you@example.com' AND a.app_key = 'temple-time';
 - Backend (`api/api.php`): re-upload by FTP to
   `seniorfamily.org/temple-time-api/` -- it does not auto-deploy from GitHub.
 - Schema changes: run the new `CREATE TABLE` / `ALTER TABLE` statements by
-  hand in phpMyAdmin.
+  hand in phpMyAdmin, **before** re-uploading any `api.php` that depends on
+  them (see the Phase 2 note above -- worth double-checking whenever a phase
+  adds a column that an *existing* query will now select, since that can
+  break screens that were already working).

@@ -145,7 +145,7 @@ function nullIfBlank(string $s): ?string {
 
 function templesForUser(int $userId): array {
   $stmt = db()->prepare(
-    "SELECT t.*,
+    "SELECT t.*, pp.thumb_path AS primary_photo_thumb,
        (SELECT COUNT(*) FROM tt_visits v WHERE v.temple_id = t.id) AS visit_count,
        (SELECT MIN(v.visit_date) FROM tt_visits v WHERE v.temple_id = t.id) AS first_visit_date,
        (SELECT MAX(v.visit_date) FROM tt_visits v WHERE v.temple_id = t.id) AS last_visit_date,
@@ -154,7 +154,9 @@ function templesForUser(int $userId): array {
          JOIN tt_visit_purposes p ON p.visit_id = v.id
          WHERE v.temple_id = t.id AND p.purpose = 'Temple Grounds'
        ) AS grounds_visited
-     FROM tt_temples t WHERE t.user_id = ? ORDER BY t.name"
+     FROM tt_temples t
+     LEFT JOIN tt_photos pp ON pp.id = t.primary_photo_id
+     WHERE t.user_id = ? ORDER BY t.name"
   );
   $stmt->bind_param('i', $userId);
   $stmt->execute();
@@ -184,6 +186,8 @@ function templesForUser(int $userId): array {
       'FirstVisitDate' => $r['first_visit_date'],
       'LastVisitDate' => $r['last_visit_date'],
       'GroundsVisited' => (bool)$r['grounds_visited'],
+      'PrimaryPhotoId' => $r['primary_photo_id'] !== null ? (int)$r['primary_photo_id'] : null,
+      'PrimaryPhotoThumbUrl' => $r['primary_photo_thumb'] ? photoUrl($r['primary_photo_thumb']) : null,
     ];
   }
   $stmt->close();
@@ -345,8 +349,12 @@ function tagIdsForNames(int $userId, array $names): array {
 }
 
 function visitsForUser(int $userId, ?int $temple_id = null): array {
-  $sql = "SELECT v.*, t.name AS temple_name, t.city AS temple_city, t.state_region AS temple_state
-          FROM tt_visits v JOIN tt_temples t ON t.id = v.temple_id
+  $sql = "SELECT v.*, t.name AS temple_name, t.city AS temple_city, t.state_region AS temple_state,
+            cp.thumb_path AS cover_photo_thumb, tp.thumb_path AS temple_primary_photo_thumb
+          FROM tt_visits v
+          JOIN tt_temples t ON t.id = v.temple_id
+          LEFT JOIN tt_photos cp ON cp.id = v.cover_photo_id
+          LEFT JOIN tt_photos tp ON tp.id = t.primary_photo_id
           WHERE v.user_id = ?" . ($temple_id ? " AND v.temple_id = ?" : "") . "
           ORDER BY v.visit_date DESC, v.id DESC";
   $stmt = db()->prepare($sql);
@@ -377,6 +385,11 @@ function visitsForUser(int $userId, ?int $temple_id = null): array {
       'MemorableExperiences' => $r['memorable_experiences'],
       'PeopleEncountered' => $r['people_encountered'],
       'FavoriteVisit' => (bool)$r['favorite_visit'],
+      // Visit Cover Photo if set, else the Temple's Primary Photo (spec
+      // 6.3/8.1: cards show "Visit Cover Photo or Temple Primary Photo").
+      'CoverPhotoThumbUrl' => $r['cover_photo_thumb']
+        ? photoUrl($r['cover_photo_thumb'])
+        : ($r['temple_primary_photo_thumb'] ? photoUrl($r['temple_primary_photo_thumb']) : null),
       'Purposes' => [],
       'WorkPerformed' => [],
       'WhoWith' => [],
@@ -553,11 +566,317 @@ function deleteVisit(int $userId, int $id): void {
   $stmt->close();
 }
 
+// ---- Photos ----
+
+function photosConfigured(): bool {
+  return defined('PHOTO_UPLOAD_DIR') && PHOTO_UPLOAD_DIR !== ''
+    && defined('PHOTO_BASE_URL') && PHOTO_BASE_URL !== ''
+    && is_dir(PHOTO_UPLOAD_DIR) && is_writable(PHOTO_UPLOAD_DIR);
+}
+
+function photoUrl(string $filename): string {
+  return rtrim(PHOTO_BASE_URL, '/') . '/' . $filename;
+}
+
+function photosForUser(int $userId): array {
+  $stmt = db()->prepare(
+    "SELECT p.*, t.name AS temple_name, v.visit_date, v.temple_id AS visit_temple_id
+     FROM tt_photos p
+     LEFT JOIN tt_temples t ON t.id = p.temple_id
+     LEFT JOIN tt_visits v ON v.id = p.visit_id
+     WHERE p.user_id = ?
+     ORDER BY p.uploaded_at DESC, p.id DESC"
+  );
+  $stmt->bind_param('i', $userId);
+  $stmt->execute();
+  $res = $stmt->get_result();
+  $photos = [];
+  $ids = [];
+  while ($r = $res->fetch_assoc()) {
+    $id = (int)$r['id'];
+    $ids[] = $id;
+    $photos[$id] = [
+      'Id' => $id,
+      'TempleId' => $r['temple_id'] !== null ? (int)$r['temple_id'] : null,
+      'TempleName' => $r['temple_name'],
+      'VisitId' => $r['visit_id'] !== null ? (int)$r['visit_id'] : null,
+      'VisitDate' => $r['visit_date'],
+      'ImageUrl' => photoUrl($r['image_path']),
+      'ThumbUrl' => photoUrl($r['thumb_path']),
+      'OriginalFilename' => $r['original_filename'],
+      'DateTaken' => $r['date_taken'],
+      'Caption' => $r['caption'],
+      'Favorite' => (bool)$r['favorite'],
+      'UploadedAt' => $r['uploaded_at'],
+      'People' => [],
+      'Tags' => [],
+    ];
+  }
+  $stmt->close();
+  if (!$ids) { return []; }
+
+  $placeholders = implode(',', array_fill(0, count($ids), '?'));
+  $types = str_repeat('i', count($ids));
+
+  $stmt = db()->prepare(
+    "SELECT pp.photo_id, pe.id, pe.first_name, pe.last_name, pe.display_name
+     FROM tt_photo_people pp JOIN tt_people pe ON pe.id = pp.person_id
+     WHERE pp.photo_id IN ($placeholders)"
+  );
+  $stmt->bind_param($types, ...$ids);
+  $stmt->execute();
+  $res = $stmt->get_result();
+  while ($r = $res->fetch_assoc()) {
+    $photos[(int)$r['photo_id']]['People'][] = [
+      'Id' => (int)$r['id'],
+      'Name' => $r['display_name'] ?: trim($r['first_name'] . ' ' . $r['last_name']),
+    ];
+  }
+  $stmt->close();
+
+  $stmt = db()->prepare(
+    "SELECT pt.photo_id, tg.name FROM tt_photo_tags pt JOIN tt_tags tg ON tg.id = pt.tag_id
+     WHERE pt.photo_id IN ($placeholders)"
+  );
+  $stmt->bind_param($types, ...$ids);
+  $stmt->execute();
+  $res = $stmt->get_result();
+  while ($r = $res->fetch_assoc()) { $photos[(int)$r['photo_id']]['Tags'][] = $r['name']; }
+  $stmt->close();
+
+  return array_values($photos);
+}
+
+// Reads an uploaded image from a temp path and returns a JPEG blob resized
+// to fit within $maxSide x $maxSide (no upscaling). The client (js/photo.js)
+// already resizes before upload so this is normally a no-op pass-through,
+// but it's what actually enforces the 1600x1600 / thumbnail size caps --
+// a client that skips resizing, or a direct API call, still gets capped
+// here. Requires GD (bundled with virtually all PHP builds).
+function resizeToJpeg(string $tmpPath, int $maxSide, int $quality): ?string {
+  $info = @getimagesize($tmpPath);
+  if (!is_array($info)) { return null; }
+  [$width, $height, $type] = $info;
+  $src = null;
+  switch ($type) {
+    case IMAGETYPE_JPEG: $src = @imagecreatefromjpeg($tmpPath); break;
+    case IMAGETYPE_PNG: $src = @imagecreatefrompng($tmpPath); break;
+    case IMAGETYPE_WEBP: if (function_exists('imagecreatefromwebp')) { $src = @imagecreatefromwebp($tmpPath); } break;
+  }
+  if (!$src) { return null; }
+
+  $scale = min(1.0, $maxSide / max($width, $height));
+  $newW = max(1, (int)round($width * $scale));
+  $newH = max(1, (int)round($height * $scale));
+  $dst = imagecreatetruecolor($newW, $newH);
+  imagefill($dst, 0, 0, imagecolorallocate($dst, 255, 255, 255));
+  imagecopyresampled($dst, $src, 0, 0, 0, 0, $newW, $newH, $width, $height);
+  imagedestroy($src);
+
+  ob_start();
+  imagejpeg($dst, null, $quality);
+  $bytes = ob_get_clean();
+  imagedestroy($dst);
+  return $bytes === false ? null : $bytes;
+}
+
+// Accepts the two files the client already resized ("standard" up to
+// 1600x1600, "thumb" ~450px) plus attachment/caption fields, and writes
+// them to PHOTO_UPLOAD_DIR under a random filename pair.
+function uploadPhoto(int $userId, array $post, array $files): int {
+  if (!photosConfigured()) { fail('Photo uploads are not configured on the server yet.', 500); }
+
+  $templeId = isset($post['templeId']) && $post['templeId'] !== '' ? (int)$post['templeId'] : null;
+  $visitId = isset($post['visitId']) && $post['visitId'] !== '' ? (int)$post['visitId'] : null;
+  if ($templeId === null && $visitId === null) { fail('A Photo needs a Temple or a Visit.'); }
+
+  if ($templeId !== null) {
+    $chk = db()->prepare('SELECT 1 FROM tt_temples WHERE id = ? AND user_id = ?');
+    $chk->bind_param('ii', $templeId, $userId);
+    $chk->execute();
+    if (!$chk->get_result()->fetch_row()) { fail('Temple not found'); }
+    $chk->close();
+  }
+  if ($visitId !== null) {
+    $chk = db()->prepare('SELECT temple_id FROM tt_visits WHERE id = ? AND user_id = ?');
+    $chk->bind_param('ii', $visitId, $userId);
+    $chk->execute();
+    $row = $chk->get_result()->fetch_assoc();
+    $chk->close();
+    if (!$row) { fail('Visit not found'); }
+    // A Photo uploaded from a Visit is automatically attached to that
+    // Visit's Temple too, even if the caller didn't pass templeId.
+    if ($templeId === null) { $templeId = (int)$row['temple_id']; }
+  }
+
+  $standard = validateUploadedImage($files['standard'] ?? null);
+  $thumb = validateUploadedImage($files['thumb'] ?? null);
+
+  // The client already resizes before upload, but the 1600x1600 / ~450px
+  // caps are a real constraint (spec section 9.1), not just polite client
+  // behavior -- re-encode server-side too so a direct API call (or a client
+  // that skipped the resize) can't store an oversized image.
+  $standardBytes = resizeToJpeg($standard['tmp_name'], 1600, 85);
+  $thumbBytes = resizeToJpeg($thumb['tmp_name'], 500, 80);
+  if ($standardBytes === null || $thumbBytes === null) {
+    fail('Could not process that image on the server (unsupported format or GD unavailable).', 500);
+  }
+
+  $token = bin2hex(random_bytes(16));
+  $imagePath = $token . '.jpg';
+  $thumbPath = $token . '_thumb.jpg';
+  $dir = rtrim(PHOTO_UPLOAD_DIR, '/');
+
+  if (@file_put_contents($dir . '/' . $imagePath, $standardBytes) === false) {
+    fail('Could not save the photo.', 500);
+  }
+  if (@file_put_contents($dir . '/' . $thumbPath, $thumbBytes) === false) {
+    @unlink($dir . '/' . $imagePath);
+    fail('Could not save the photo thumbnail.', 500);
+  }
+
+  $originalFilename = nullIfBlank((string)($post['originalFilename'] ?? ''));
+  $caption = nullIfBlank((string)($post['caption'] ?? ''));
+  $dateTaken = nullIfBlank((string)($post['dateTaken'] ?? ''));
+  if ($dateTaken !== null && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateTaken)) { $dateTaken = null; }
+
+  $stmt = db()->prepare(
+    'INSERT INTO tt_photos (user_id, temple_id, visit_id, image_path, thumb_path, original_filename, date_taken, caption)
+     VALUES (?,?,?,?,?,?,?,?)'
+  );
+  $stmt->bind_param('iiisssss', $userId, $templeId, $visitId, $imagePath, $thumbPath, $originalFilename, $dateTaken, $caption);
+  $stmt->execute();
+  $id = $stmt->insert_id;
+  $stmt->close();
+  return $id;
+}
+
+// getimagesize both identifies the type and proves the bytes are a real,
+// decodable image (fileinfo extension not required) -- same check Choir
+// Connect's roster-photo upload uses. Since the client always re-encodes as
+// JPEG before upload, only jpeg is really expected, but png/webp are
+// accepted too in case a future caller sends one directly.
+function validateUploadedImage(?array $file): array {
+  if ($file === null || ($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK
+      || !is_uploaded_file($file['tmp_name'] ?? '')) {
+    fail('Missing photo file.');
+  }
+  if (($file['size'] ?? 0) > 8 * 1024 * 1024) {
+    fail('That photo is too large (8MB max).');
+  }
+  $info = @getimagesize($file['tmp_name']);
+  $mime = is_array($info) ? ($info['mime'] ?? '') : '';
+  if (!in_array($mime, ['image/jpeg', 'image/png', 'image/webp'], true)) {
+    fail('That file is not a supported image type.');
+  }
+  return $file;
+}
+
+function updatePhoto(int $userId, int $id, array $p): void {
+  $caption = nullIfBlank((string)($p['caption'] ?? ''));
+  $dateTaken = nullIfBlank((string)($p['dateTaken'] ?? ''));
+  if ($dateTaken !== null && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateTaken)) { $dateTaken = null; }
+  $favorite = !empty($p['favorite']) ? 1 : 0;
+
+  $stmt = db()->prepare('UPDATE tt_photos SET caption=?, date_taken=?, favorite=? WHERE id=? AND user_id=?');
+  $stmt->bind_param('ssiii', $caption, $dateTaken, $favorite, $id, $userId);
+  $stmt->execute();
+  $stmt->close();
+
+  $conn = db();
+  $del = $conn->prepare('DELETE FROM tt_photo_people WHERE photo_id = ?');
+  $del->bind_param('i', $id); $del->execute(); $del->close();
+  $personIds = array_values(array_unique(array_map('intval', (array)($p['personIds'] ?? []))));
+  if ($personIds) {
+    $placeholders = implode(',', array_fill(0, count($personIds), '?'));
+    $types = 'i' . str_repeat('i', count($personIds));
+    $chk = $conn->prepare("SELECT id FROM tt_people WHERE user_id = ? AND id IN ($placeholders)");
+    $params = array_merge([$userId], $personIds);
+    $chk->bind_param($types, ...$params);
+    $chk->execute();
+    $validIds = [];
+    $res = $chk->get_result();
+    while ($r = $res->fetch_row()) { $validIds[] = (int)$r[0]; }
+    $chk->close();
+    if ($validIds) {
+      $stmt = $conn->prepare('INSERT INTO tt_photo_people (photo_id, person_id) VALUES (?, ?)');
+      foreach ($validIds as $pid) { $stmt->bind_param('ii', $id, $pid); $stmt->execute(); }
+      $stmt->close();
+    }
+  }
+
+  $del = $conn->prepare('DELETE FROM tt_photo_tags WHERE photo_id = ?');
+  $del->bind_param('i', $id); $del->execute(); $del->close();
+  $tagNames = (array)($p['tags'] ?? []);
+  if ($tagNames) {
+    $tagIds = tagIdsForNames($userId, $tagNames);
+    if ($tagIds) {
+      $stmt = $conn->prepare('INSERT INTO tt_photo_tags (photo_id, tag_id) VALUES (?, ?)');
+      foreach ($tagIds as $tid) { $stmt->bind_param('ii', $id, $tid); $stmt->execute(); }
+      $stmt->close();
+    }
+  }
+}
+
+function deletePhoto(int $userId, int $id): void {
+  $stmt = db()->prepare('SELECT image_path, thumb_path FROM tt_photos WHERE id = ? AND user_id = ?');
+  $stmt->bind_param('ii', $id, $userId);
+  $stmt->execute();
+  $row = $stmt->get_result()->fetch_assoc();
+  $stmt->close();
+  if (!$row) { return; }
+
+  $stmt = db()->prepare('DELETE FROM tt_photos WHERE id = ? AND user_id = ?');
+  $stmt->bind_param('ii', $id, $userId);
+  $stmt->execute();
+  $stmt->close();
+
+  if (photosConfigured()) {
+    $dir = rtrim(PHOTO_UPLOAD_DIR, '/');
+    @unlink($dir . '/' . $row['image_path']);
+    @unlink($dir . '/' . $row['thumb_path']);
+  }
+}
+
+function setTemplePrimaryPhoto(int $userId, int $templeId, ?int $photoId): void {
+  if ($photoId !== null) {
+    $chk = db()->prepare('SELECT 1 FROM tt_photos WHERE id = ? AND user_id = ?');
+    $chk->bind_param('ii', $photoId, $userId);
+    $chk->execute();
+    if (!$chk->get_result()->fetch_row()) { fail('Photo not found'); }
+    $chk->close();
+  }
+  $stmt = db()->prepare('UPDATE tt_temples SET primary_photo_id = ? WHERE id = ? AND user_id = ?');
+  $stmt->bind_param('iii', $photoId, $templeId, $userId);
+  $stmt->execute();
+  $stmt->close();
+}
+
+function setVisitCoverPhoto(int $userId, int $visitId, ?int $photoId): void {
+  if ($photoId !== null) {
+    $chk = db()->prepare('SELECT 1 FROM tt_photos WHERE id = ? AND user_id = ?');
+    $chk->bind_param('ii', $photoId, $userId);
+    $chk->execute();
+    if (!$chk->get_result()->fetch_row()) { fail('Photo not found'); }
+    $chk->close();
+  }
+  $stmt = db()->prepare('UPDATE tt_visits SET cover_photo_id = ? WHERE id = ? AND user_id = ?');
+  $stmt->bind_param('iii', $photoId, $visitId, $userId);
+  $stmt->execute();
+  $stmt->close();
+}
+
 // ---- Router ----
 
 $method = $_SERVER['REQUEST_METHOD'];
-$body = $method === 'POST' ? jsonBody() : [];
-$action = $method === 'GET' ? ($_GET['action'] ?? '') : ($body['action'] ?? '');
+// A photo upload (addPhoto) comes in as multipart/form-data, so its action
+// and fields live in $_POST, not a JSON body.
+$isMultipart = $method === 'POST'
+  && strpos((string)($_SERVER['CONTENT_TYPE'] ?? ''), 'multipart/form-data') === 0;
+$body = ($method === 'POST' && !$isMultipart) ? jsonBody() : [];
+$action = $method === 'GET'
+  ? ($_GET['action'] ?? '')
+  : ($isMultipart ? ($_POST['action'] ?? '') : ($body['action'] ?? ''));
 
 switch ($action) {
 
@@ -651,6 +970,57 @@ switch ($action) {
     $id = (int)($body['id'] ?? 0);
     if ($id <= 0) { fail('Missing visit id'); }
     deleteVisit((int)$user['id'], $id);
+    respond(['ok' => true]);
+  }
+
+  // -- Photos --
+
+  case 'photosConfigured': {
+    respond(['ok' => true, 'configured' => photosConfigured()]);
+  }
+
+  case 'photos': {
+    $user = requireMember();
+    respond(['ok' => true, 'photos' => photosForUser((int)$user['id'])]);
+  }
+
+  case 'addPhoto': {
+    $user = requireMember();
+    $id = uploadPhoto((int)$user['id'], $_POST, $_FILES);
+    respond(['ok' => true, 'id' => $id]);
+  }
+
+  case 'updatePhoto': {
+    $user = requireMember();
+    $id = (int)($body['id'] ?? 0);
+    if ($id <= 0) { fail('Missing photo id'); }
+    updatePhoto((int)$user['id'], $id, $body);
+    respond(['ok' => true]);
+  }
+
+  case 'deletePhoto': {
+    $user = requireMember();
+    $id = (int)($body['id'] ?? 0);
+    if ($id <= 0) { fail('Missing photo id'); }
+    deletePhoto((int)$user['id'], $id);
+    respond(['ok' => true]);
+  }
+
+  case 'setTemplePrimaryPhoto': {
+    $user = requireMember();
+    $templeId = (int)($body['templeId'] ?? 0);
+    if ($templeId <= 0) { fail('Missing temple id'); }
+    $photoId = isset($body['photoId']) && $body['photoId'] !== null ? (int)$body['photoId'] : null;
+    setTemplePrimaryPhoto((int)$user['id'], $templeId, $photoId);
+    respond(['ok' => true]);
+  }
+
+  case 'setVisitCoverPhoto': {
+    $user = requireMember();
+    $visitId = (int)($body['visitId'] ?? 0);
+    if ($visitId <= 0) { fail('Missing visit id'); }
+    $photoId = isset($body['photoId']) && $body['photoId'] !== null ? (int)$body['photoId'] : null;
+    setVisitCoverPhoto((int)$user['id'], $visitId, $photoId);
     respond(['ok' => true]);
   }
 

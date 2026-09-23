@@ -22,6 +22,7 @@
 
 <script src="js/api.js"></script>
 <script src="js/app.js"></script>
+<script src="js/photo.js"></script>
 <script>
 let _visit = null;
 let _temple = null;
@@ -67,6 +68,7 @@ async function loadVisit() {
         <div class="detail-actions">
           <a class="btn" href="visit-edit.html?id=${v.Id}">Edit Visit</a>
           <a class="btn secondary" href="visit-edit.html?duplicateOf=${v.Id}">Duplicate as New Visit</a>
+          <span id="add-photo-here"></span>
           ${_temple ? `<a class="btn secondary" href="${mapsUrl(_temple)}" target="_blank" rel="noopener">Navigate to Temple</a>` : ''}
           <a class="btn secondary" href="temple.html?id=${v.TempleId}">View Temple</a>
           <button type="button" class="btn secondary" onclick="deleteVisit()">Delete Visit</button>
@@ -85,9 +87,23 @@ async function loadVisit() {
       ${v.MemorableExperiences ? `<div class="card journal-section"><h3>Memorable Experiences</h3><p>${escapeHtml(v.MemorableExperiences)}</p></div>` : ''}
       ${v.PeopleEncountered ? `<div class="card journal-section"><h3>People Encountered</h3><p>${escapeHtml(v.PeopleEncountered)}</p></div>` : ''}
       ${(v.Tags || []).length ? `<div class="card journal-section"><h3>Tags</h3><p>${v.Tags.map(t => `<span class="tag-pill">${escapeHtml(t)}</span>`).join('')}</p></div>` : ''}
+
+      <h2>Photos</h2>
+      <div id="gallery-grid"></div>
     `;
 
     content.innerHTML = html;
+
+    const photosRes = await fetchData('photos');
+    const photos = (photosRes.photos || []).filter(p => p.VisitId === id);
+    document.getElementById('gallery-grid').innerHTML = photos.length
+      ? `<div class="card-grid">${photos.map(photoCardHtml).join('')}</div>`
+      : emptyStateHtml('No Photos of this Visit yet.', '', '');
+
+    renderPhotoUploader(document.getElementById('add-photo-here'), {
+      visitId: id,
+      onUploaded: async () => { await loadVisit(); },
+    });
   } catch (err) {
     handleError(content, err);
   }

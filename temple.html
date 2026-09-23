@@ -22,6 +22,7 @@
 
 <script src="js/api.js"></script>
 <script src="js/app.js"></script>
+<script src="js/photo.js"></script>
 <script>
 let _temple = null;
 
@@ -123,13 +124,15 @@ async function loadTemple() {
   if (!id) { content.innerHTML = '<p class="note">No temple specified.</p>'; return; }
 
   try {
-    const [templesRes, visitsRes, vocab] = await Promise.all([
-      fetchData('temples'), fetchData('visits', { templeId: id }), getVocab().catch(() => ({ statuses: [] })),
+    const [templesRes, visitsRes, photosRes, vocab] = await Promise.all([
+      fetchData('temples'), fetchData('visits', { templeId: id }), fetchData('photos'),
+      getVocab().catch(() => ({ statuses: [] })),
     ]);
     const t = (templesRes.temples || []).find(x => x.Id === id);
     if (!t) { content.innerHTML = '<p class="note">Temple not found.</p>'; return; }
     _temple = t;
     const visits = visitsRes.visits || [];
+    const photos = (photosRes.photos || []).filter(p => p.TempleId === id);
     const peopleTogether = new Set();
     visits.forEach(v => (v.WhoWith || []).forEach(p => peopleTogether.add(p.Id)));
     const groundsVisits = visits.filter(v => (v.Purposes || []).includes('Temple Grounds')).length;
@@ -153,6 +156,7 @@ async function loadTemple() {
         <div class="detail-actions">
           <a class="btn" href="visit-edit.html?templeId=${t.Id}">Quick Log</a>
           <a class="btn secondary" href="${mapsUrl(t)}" target="_blank" rel="noopener">Navigate</a>
+          <span id="add-photo-here"></span>
           <button type="button" class="btn secondary" onclick="toggleFavorite()">${t.Favorite ? 'Unfavorite' : 'Favorite'}</button>
           <button type="button" class="btn secondary" onclick="toggleVisitList()">${t.OnVisitList ? 'Remove from Visit List' : 'Add to My Visit List'}</button>
           <button type="button" class="btn secondary" onclick="openEditForm()">Edit Temple</button>
@@ -211,6 +215,9 @@ async function loadTemple() {
         </form>
       </div>
 
+      <h2>Temple Gallery</h2>
+      <div id="gallery-grid"></div>
+
       <h2>Recent Visits</h2>
     `;
 
@@ -223,6 +230,15 @@ async function loadTemple() {
 
     content.innerHTML = html;
     document.getElementById('edit-form').addEventListener('submit', submitEditTemple);
+
+    document.getElementById('gallery-grid').innerHTML = photos.length
+      ? `<div class="card-grid">${photos.slice(0, 12).map(photoCardHtml).join('')}</div>`
+      : emptyStateHtml('No Photos of this Temple yet.', '', '');
+
+    renderPhotoUploader(document.getElementById('add-photo-here'), {
+      templeId: t.Id,
+      onUploaded: async () => { await loadTemple(); },
+    });
   } catch (err) {
     handleError(content, err);
   }

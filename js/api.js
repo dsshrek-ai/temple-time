@@ -48,6 +48,26 @@ async function postAction(action, payload) {
   return res.json();
 }
 
+// Like postAction, but sends a FormData body (multipart/form-data) instead
+// of JSON -- used only for photo uploads, which carry binary file fields
+// alongside the action name and other form fields.
+async function postForm(action, formData) {
+  if (!isConfigured()) throw new Error('not-configured');
+  formData.set('action', action);
+  const res = await fetch(CONFIG.API_URL, {
+    method: 'POST',
+    headers: { ...authHeaders() }, // no Content-Type -- browser sets the multipart boundary
+    body: formData,
+  });
+  if (res.status === 401 || res.status === 403) throw new Error('not-authorized');
+  if (!res.ok) {
+    let serverMessage = '';
+    try { serverMessage = (await res.clone().json()).error || ''; } catch (e) { /* body wasn't JSON */ }
+    throw new Error(serverMessage || `Request failed: ${res.status}`);
+  }
+  return res.json();
+}
+
 function escapeHtml(str) {
   const d = document.createElement('div');
   d.textContent = str ?? '';

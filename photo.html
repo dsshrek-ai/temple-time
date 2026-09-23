@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Photo — Temple Time</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="bar">
+    <h1>Temple Time</h1>
+    <nav id="site-nav"></nav>
+    <div class="header-right"><button class="btn secondary" id="logout-btn">Log Out</button></div>
+  </div>
+</header>
+
+<main>
+  <p><a href="photos.html">&larr; All Photos</a></p>
+  <div id="content"><p class="note">Loading...</p></div>
+</main>
+
+<script src="js/api.js"></script>
+<script src="js/app.js"></script>
+<script src="js/photo.js"></script>
+<script>
+let _photo = null;
+let _people = [];
+
+async function toggleFavorite() {
+  await postAction('updatePhoto', {
+    id: _photo.Id, caption: _photo.Caption, dateTaken: _photo.DateTaken,
+    favorite: !_photo.Favorite,
+    personIds: (_photo.People || []).map(p => p.Id), tags: _photo.Tags || [],
+  });
+  loadPhoto();
+}
+
+async function setAsTemplePrimary() {
+  await postAction('setTemplePrimaryPhoto', { templeId: _photo.TempleId, photoId: _photo.Id });
+  alert('Set as Temple Primary Photo.');
+}
+
+async function setAsVisitCover() {
+  await postAction('setVisitCoverPhoto', { visitId: _photo.VisitId, photoId: _photo.Id });
+  alert('Set as Visit Cover Photo.');
+}
+
+async function deletePhoto() {
+  if (!confirm('Delete this Photo? This cannot be undone.')) return;
+  await postAction('deletePhoto', { id: _photo.Id });
+  window.location.href = _photo.VisitId ? `visit.html?id=${_photo.VisitId}` : `temple.html?id=${_photo.TempleId}`;
+}
+
+function openEditForm() {
+  const p = _photo;
+  document.getElementById('edit-form-wrap').style.display = 'block';
+  document.getElementById('e-caption').value = p.Caption || '';
+  document.getElementById('e-datetaken').value = p.DateTaken || '';
+  document.getElementById('e-tags').value = (p.Tags || []).join(', ');
+  const ids = new Set((p.People || []).map(x => String(x.Id)));
+  document.querySelectorAll('#e-people input[type=checkbox]').forEach(cb => { cb.checked = ids.has(cb.value); });
+}
+
+async function submitEdit(ev) {
+  ev.preventDefault();
+  const msg = document.getElementById('edit-msg');
+  const personIds = Array.from(document.querySelectorAll('#e-people input[type=checkbox]:checked')).map(cb => Number(cb.value));
+  const tags = document.getElementById('e-tags').value.split(',').map(t => t.trim()).filter(Boolean);
+  try {
+    await postAction('updatePhoto', {
+      id: _photo.Id,
+      caption: document.getElementById('e-caption').value.trim(),
+      dateTaken: document.getElementById('e-datetaken').value,
+      favorite: _photo.Favorite,
+      personIds, tags,
+    });
+    document.getElementById('edit-form-wrap').style.display = 'none';
+    loadPhoto();
+  } catch (err) {
+    msg.innerHTML = `<p class="field-error">${escapeHtml(err.message || 'Could not save.')}</p>`;
+  }
+}
+
+async function loadPhoto() {
+  const content = document.getElementById('content');
+  await initPage('photos.html');
+  const id = Number(new URLSearchParams(window.location.search).get('id'));
+  if (!id) { content.innerHTML = '<p class="note">No photo specified.</p>'; return; }
+
+  try {
+    const [photosRes, peopleRes] = await Promise.all([fetchData('photos'), fetchData('people')]);
+    const p = (photosRes.photos || []).find(x => x.Id === id);
+    if (!p) { content.innerHTML = '<p class="note">Photo not found.</p>'; return; }
+    _photo = p;
+    _people = (peopleRes.people || []).filter(x => x.Active);
+
+    const meta = [];
+    if (p.TempleName) meta.push(`<a href="temple.html?id=${p.TempleId}">${escapeHtml(p.TempleName)}</a>`);
+    if (p.VisitId) meta.push(`<a href="visit.html?id=${p.VisitId}">${escapeHtml(formatDate(p.VisitDate))} Visit</a>`);
+
+    let html = `
+      <img class="photo-detail-img" src="${escapeHtml(p.ImageUrl)}" alt="${escapeHtml(p.Caption || '')}">
+      <div class="card">
+        <div class="detail-header">
+          <div>
+            <p class="meta">${meta.join(' · ')}${p.Favorite ? ' · ★ Favorite' : ''}</p>
+            ${p.Caption ? `<p>${escapeHtml(p.Caption)}</p>` : ''}
+            ${p.DateTaken ? `<p class="meta">Taken ${escapeHtml(formatDate(p.DateTaken))}</p>` : ''}
+            ${(p.People || []).length ? `<p class="meta">With ${escapeHtml(p.People.map(x => x.Name).join(', '))}</p>` : ''}
+            ${(p.Tags || []).length ? `<p>${p.Tags.map(t => `<span class="tag-pill">${escapeHtml(t)}</span>`).join('')}</p>` : ''}
+          </div>
+        </div>
+        <div class="detail-actions">
+          <button type="button" class="btn secondary" onclick="openEditForm()">Edit Caption / Tags / People</button>
+          <button type="button" class="btn secondary" onclick="toggleFavorite()">${p.Favorite ? 'Unfavorite' : 'Mark Favorite'}</button>
+          ${p.TempleId ? `<button type="button" class="btn secondary" onclick="setAsTemplePrimary()">Set as Temple Primary Photo</button>` : ''}
+          ${p.VisitId ? `<button type="button" class="btn secondary" onclick="setAsVisitCover()">Set as Visit Cover Photo</button>` : ''}
+          <button type="button" class="btn secondary" onclick="deletePhoto()">Delete Photo</button>
+        </div>
+
+        <div id="edit-form-wrap" style="display:none">
+          <form id="edit-form">
+            <label for="e-caption">Caption</label>
+            <input type="text" id="e-caption">
+            <label for="e-datetaken">Date Taken</label>
+            <input type="date" id="e-datetaken">
+            <label>People</label>
+            <div id="e-people" class="pick-list">
+              ${_people.map(person => `<label><input type="checkbox" value="${person.Id}"> ${escapeHtml(person.DisplayName || person.FirstName)}</label>`).join('')}
+            </div>
+            <label for="e-tags">Tags (comma separated)</label>
+            <input type="text" id="e-tags">
+            <div id="edit-msg"></div>
+            <div class="form-actions">
+              <button type="submit" class="btn">Save</button>
+              <button type="button" class="btn secondary" onclick="document.getElementById('edit-form-wrap').style.display='none'">Cancel</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    `;
+
+    content.innerHTML = html;
+    document.getElementById('edit-form').addEventListener('submit', submitEdit);
+  } catch (err) {
+    handleError(content, err);
+  }
+}
+loadPhoto();
+</script>
+</body>
+</html>

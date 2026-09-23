@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Photos — Temple Time</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="bar">
+    <h1>Temple Time</h1>
+    <nav id="site-nav"></nav>
+    <div class="header-right"><button class="btn secondary" id="logout-btn">Log Out</button></div>
+  </div>
+</header>
+
+<main>
+  <div id="content"><p class="note">Loading...</p></div>
+</main>
+
+<script src="js/api.js"></script>
+<script src="js/app.js"></script>
+<script src="js/photo.js"></script>
+<script>
+let _photos = [];
+let _temples = [];
+let _people = [];
+
+function yearOf(p) {
+  const d = p.DateTaken || p.UploadedAt;
+  return d ? d.slice(0, 4) : '';
+}
+
+function renderList() {
+  const favOnly = document.getElementById('f-fav').checked;
+  const templeId = document.getElementById('f-temple').value;
+  const personId = document.getElementById('f-person').value;
+  const tag = document.getElementById('f-tag').value;
+  const year = document.getElementById('f-year').value;
+
+  let list = _photos;
+  if (favOnly) list = list.filter(p => p.Favorite);
+  if (templeId) list = list.filter(p => String(p.TempleId) === templeId);
+  if (personId) list = list.filter(p => (p.People || []).some(x => String(x.Id) === personId));
+  if (tag) list = list.filter(p => (p.Tags || []).includes(tag));
+  if (year) list = list.filter(p => yearOf(p) === year);
+
+  const grid = document.getElementById('p-grid');
+  grid.innerHTML = list.length
+    ? `<div class="card-grid">${list.map(photoCardHtml).join('')}</div>`
+    : emptyStateHtml('No records match these filters.', '',
+        `<p><button type="button" class="btn secondary" onclick="document.getElementById('f-fav').checked=false;document.getElementById('f-temple').value='';document.getElementById('f-person').value='';document.getElementById('f-tag').value='';document.getElementById('f-year').value='';renderList()">Clear Filters</button></p>`);
+}
+
+function buildFilterOptions() {
+  const tags = new Set();
+  const years = new Set();
+  _photos.forEach(p => {
+    (p.Tags || []).forEach(t => tags.add(t));
+    const y = yearOf(p);
+    if (y) years.add(y);
+  });
+  document.getElementById('f-tag').innerHTML = `<option value="">All Tags</option>` +
+    Array.from(tags).sort().map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
+  document.getElementById('f-year').innerHTML = `<option value="">All Years</option>` +
+    Array.from(years).sort().reverse().map(y => `<option value="${y}">${y}</option>`).join('');
+}
+
+async function loadPhotos() {
+  const content = document.getElementById('content');
+  await initPage('photos.html');
+
+  try {
+    const [photosRes, templesRes, peopleRes] = await Promise.all([
+      fetchData('photos'), fetchData('temples'), fetchData('people'),
+    ]);
+    _photos = photosRes.photos || [];
+    _temples = templesRes.temples || [];
+    _people = peopleRes.people || [];
+
+    if (!_temples.length) {
+      content.innerHTML = emptyStateHtml('Add a temple first', 'You need at least one Temple before you can add Photos.',
+        `<p><a class="btn" href="temples.html?add=1">Add Temple</a></p>`);
+      return;
+    }
+
+    content.innerHTML = `
+      <h2>Photos</h2>
+      <div id="add-form-wrap" class="card" style="display:none">
+        <h3>Add Photos</h3>
+        <label for="up-temple">Temple</label>
+        <select id="up-temple">${_temples.map(t => `<option value="${t.Id}">${escapeHtml(t.Name)}</option>`).join('')}</select>
+        <p class="note">Photos added here are just attached to a Temple. To attach Photos to a specific Visit, upload from that Visit's detail page instead.</p>
+        <div id="uploader"></div>
+      </div>
+      <div class="filter-bar">
+        <button type="button" class="btn" id="add-photo-btn">+ Add Photos</button>
+        <label class="checkbox"><input type="checkbox" id="f-fav"> Favorites only</label>
+        <select id="f-temple"><option value="">All Temples</option>${_temples.map(t => `<option value="${t.Id}">${escapeHtml(t.Name)}</option>`).join('')}</select>
+        <select id="f-person"><option value="">All People</option>${_people.map(p => `<option value="${p.Id}">${escapeHtml(p.DisplayName || p.FirstName)}</option>`).join('')}</select>
+        <select id="f-tag"></select>
+        <select id="f-year"></select>
+      </div>
+      <div id="p-grid"></div>
+    `;
+
+    buildFilterOptions();
+    if (_photos.length) {
+      renderList();
+    } else {
+      document.getElementById('p-grid').innerHTML = emptyStateHtml('No Photos yet', 'Add photos from a Temple or Visit page, or right here.', '');
+    }
+
+    ['f-fav', 'f-temple', 'f-person', 'f-tag', 'f-year'].forEach(id => {
+      document.getElementById(id).addEventListener('change', renderList);
+    });
+
+    document.getElementById('add-photo-btn').addEventListener('click', () => {
+      const wrap = document.getElementById('add-form-wrap');
+      wrap.style.display = 'block';
+      renderPhotoUploader(document.getElementById('uploader'), {
+        get templeId() { return document.getElementById('up-temple').value; },
+        onUploaded: async () => {
+          const res = await fetchData('photos');
+          _photos = res.photos || [];
+          buildFilterOptions();
+          renderList();
+        },
+      });
+      wrap.scrollIntoView({ behavior: 'smooth' });
+    });
+  } catch (err) {
+    handleError(content, err);
+  }
+}
+loadPhotos();
+</script>
+</body>
+</html>

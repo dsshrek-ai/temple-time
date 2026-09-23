@@ -7,7 +7,7 @@ const NAV_ITEMS = [
   { href: 'visits.html', label: 'Visits', built: true },
   { href: 'people.html', label: 'People', built: true },
   { href: 'plans.html', label: 'Plans', built: false },
-  { href: 'photos.html', label: 'Photos', built: false },
+  { href: 'photos.html', label: 'Photos', built: true },
   { href: 'stats.html', label: 'Statistics', built: false },
 ];
 
@@ -79,6 +79,12 @@ function whoWithSummary(whoWith) {
 
 // ---- Cards ----
 
+function thumbTagHtml(url, alt) {
+  return url
+    ? `<img class="thumb" src="${escapeHtml(url)}" alt="${escapeHtml(alt || '')}" loading="lazy">`
+    : `<div class="thumb"></div>`;
+}
+
 function templeCardHtml(t) {
   const loc = [t.City, t.StateRegion].filter(Boolean).join(', ');
   const badges = [];
@@ -86,7 +92,7 @@ function templeCardHtml(t) {
   if (t.OnVisitList) badges.push('On Visit List');
   return `
     <a class="click-card" href="temple.html?id=${t.Id}">
-      <div class="thumb"></div>
+      ${thumbTagHtml(t.PrimaryPhotoThumbUrl, t.Name)}
       <div class="body">
         <p class="title">${escapeHtml(t.Name)}</p>
         <p class="meta">${escapeHtml(loc)}</p>
@@ -106,7 +112,7 @@ function visitCardHtml(v) {
   const work = workShorthand(v.WorkPerformed);
   return `
     <a class="click-card" href="visit.html?id=${v.Id}">
-      <div class="thumb"></div>
+      ${thumbTagHtml(v.CoverPhotoThumbUrl, v.TempleName)}
       <div class="body">
         <p class="title">${escapeHtml(v.TempleName)}${v.FavoriteVisit ? ' ★' : ''}</p>
         <p class="meta">${escapeHtml(formatDate(v.VisitDate))}${loc ? ' · ' + escapeHtml(loc) : ''}</p>

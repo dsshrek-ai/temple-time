@@ -150,6 +150,64 @@ CREATE TABLE IF NOT EXISTS tt_visit_tags (
   FOREIGN KEY (tag_id) REFERENCES tt_tags(id) ON DELETE CASCADE
 ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- ---------- PHASE 2: PHOTOS ----------
+-- Run this section once against an existing Phase 1 database (the CREATE
+-- TABLEs are idempotent; the two ALTER TABLEs are not -- re-running them
+-- errors with "Duplicate column", which is harmless but means don't paste
+-- this section in twice).
+--
+-- image_path / thumb_path are bare filenames (no folder) written by
+-- api.php's photo upload handler into PHOTO_UPLOAD_DIR; the public URL is
+-- built at read time from PHOTO_BASE_URL, same pattern as Choir Connect's
+-- SONG_FILES_BASE_URL. Both files are produced client-side (browser canvas
+-- resize before upload -- see js/photo.js), always re-encoded as JPEG, which
+-- sidesteps server-side HEIC decoding entirely since the browser does the
+-- decode when it draws the source image onto the canvas.
+
+CREATE TABLE IF NOT EXISTS tt_photos (
+  id                 INT AUTO_INCREMENT PRIMARY KEY,
+  user_id            INT NOT NULL,
+  temple_id          INT NULL,
+  visit_id           INT NULL,
+  image_path         VARCHAR(255) NOT NULL,
+  thumb_path         VARCHAR(255) NOT NULL,
+  original_filename  VARCHAR(255) NULL,
+  date_taken         DATE NULL,
+  caption            VARCHAR(500) NULL,
+  favorite           TINYINT(1) NOT NULL DEFAULT 0,
+  uploaded_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  KEY ix_tt_photos_user (user_id, uploaded_at),
+  KEY ix_tt_photos_temple (temple_id),
+  KEY ix_tt_photos_visit (visit_id),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (temple_id) REFERENCES tt_temples(id) ON DELETE SET NULL,
+  FOREIGN KEY (visit_id) REFERENCES tt_visits(id) ON DELETE SET NULL
+) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS tt_photo_people (
+  photo_id   INT NOT NULL,
+  person_id  INT NOT NULL,
+  PRIMARY KEY (photo_id, person_id),
+  FOREIGN KEY (photo_id) REFERENCES tt_photos(id) ON DELETE CASCADE,
+  FOREIGN KEY (person_id) REFERENCES tt_people(id) ON DELETE CASCADE
+) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS tt_photo_tags (
+  photo_id  INT NOT NULL,
+  tag_id    INT NOT NULL,
+  PRIMARY KEY (photo_id, tag_id),
+  FOREIGN KEY (photo_id) REFERENCES tt_photos(id) ON DELETE CASCADE,
+  FOREIGN KEY (tag_id) REFERENCES tt_tags(id) ON DELETE CASCADE
+) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- One Photo per Temple/Visit may be chosen as its Primary/Cover Photo.
+-- ON DELETE SET NULL so deleting the chosen Photo doesn't block deleting
+-- (or cascade-deleting) the Temple/Visit it was attached to.
+ALTER TABLE tt_temples ADD COLUMN primary_photo_id INT NULL,
+  ADD CONSTRAINT fk_tt_temples_primary_photo FOREIGN KEY (primary_photo_id) REFERENCES tt_photos(id) ON DELETE SET NULL;
+ALTER TABLE tt_visits ADD COLUMN cover_photo_id INT NULL,
+  ADD CONSTRAINT fk_tt_visits_cover_photo FOREIGN KEY (cover_photo_id) REFERENCES tt_photos(id) ON DELETE SET NULL;
+
 -- ============================================================
 -- BOOTSTRAP (run once, after you've signed up through My Apps Hub):
 --
@@ -161,4 +219,8 @@ CREATE TABLE IF NOT EXISTS tt_visit_tags (
 --      INSERT INTO app_access (user_id, app_id)
 --      SELECT u.id, a.id FROM users u, apps a
 --      WHERE u.username = 'you@example.com' AND a.app_key = 'temple-time';
+--
+-- 3) For Phase 2 (Photos): create a "temple-time-photos" folder via FTP/File
+--    Manager, set its server path as PHOTO_UPLOAD_DIR and its public URL as
+--    PHOTO_BASE_URL in api/config.php (see config.example.php).
 -- ============================================================
