@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Temple — Temple Time</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="bar">
+    <h1>Temple Time</h1>
+    <nav id="site-nav"></nav>
+    <div class="header-right"><button class="btn secondary" id="logout-btn">Log Out</button></div>
+  </div>
+</header>
+
+<main>
+  <p><a href="temples.html">&larr; All Temples</a></p>
+  <div id="content"><p class="note">Loading...</p></div>
+</main>
+
+<script src="js/api.js"></script>
+<script src="js/app.js"></script>
+<script>
+let _temple = null;
+
+function statusBadge(t) {
+  const bits = [t.Status];
+  if (t.Favorite) bits.push('★ Favorite');
+  if (t.OnVisitList) bits.push('On Visit List');
+  if (t.Visited) bits.push('Visited');
+  return bits.map(escapeHtml).join(' · ');
+}
+
+// Always send the full field set -- updateTemple overwrites the whole row,
+// so a partial payload here would silently null out ShortName/AddressLine2/
+// Phone/Notes on every Favorite or Visit List toggle.
+function templeUpdatePayload(overrides) {
+  const t = _temple;
+  return Object.assign({
+    id: t.Id, name: t.Name, shortName: t.ShortName, status: t.Status,
+    streetAddress: t.StreetAddress, addressLine2: t.AddressLine2, city: t.City,
+    stateRegion: t.StateRegion, postalCode: t.PostalCode, country: t.Country,
+    latitude: t.Latitude, longitude: t.Longitude, phone: t.Phone, website: t.Website,
+    notes: t.Notes, favorite: t.Favorite, onVisitList: t.OnVisitList,
+  }, overrides);
+}
+
+async function toggleFavorite() {
+  await postAction('updateTemple', templeUpdatePayload({ favorite: !_temple.Favorite }));
+  loadTemple();
+}
+
+async function toggleVisitList() {
+  await postAction('updateTemple', templeUpdatePayload({ onVisitList: !_temple.OnVisitList }));
+  loadTemple();
+}
+
+function openEditForm() {
+  const t = _temple;
+  const wrap = document.getElementById('edit-form-wrap');
+  wrap.style.display = 'block';
+  document.getElementById('e-name').value = t.Name || '';
+  document.getElementById('e-shortname').value = t.ShortName || '';
+  document.getElementById('e-street').value = t.StreetAddress || '';
+  document.getElementById('e-city').value = t.City || '';
+  document.getElementById('e-state').value = t.StateRegion || '';
+  document.getElementById('e-postal').value = t.PostalCode || '';
+  document.getElementById('e-country').value = t.Country || '';
+  document.getElementById('e-website').value = t.Website || '';
+  document.getElementById('e-phone').value = t.Phone || '';
+  document.getElementById('e-line2').value = t.AddressLine2 || '';
+  document.getElementById('e-lat').value = t.Latitude ?? '';
+  document.getElementById('e-lng').value = t.Longitude ?? '';
+  document.getElementById('e-notes').value = t.Notes || '';
+  document.getElementById('e-status').value = t.Status;
+  wrap.scrollIntoView({ behavior: 'smooth' });
+}
+
+async function submitEditTemple(ev) {
+  ev.preventDefault();
+  const msg = document.getElementById('edit-msg');
+  const payload = {
+    id: _temple.Id,
+    name: document.getElementById('e-name').value.trim(),
+    shortName: document.getElementById('e-shortname').value.trim(),
+    status: document.getElementById('e-status').value,
+    streetAddress: document.getElementById('e-street').value.trim(),
+    city: document.getElementById('e-city').value.trim(),
+    stateRegion: document.getElementById('e-state').value.trim(),
+    postalCode: document.getElementById('e-postal').value.trim(),
+    country: document.getElementById('e-country').value.trim(),
+    website: document.getElementById('e-website').value.trim(),
+    phone: document.getElementById('e-phone').value.trim(),
+    addressLine2: document.getElementById('e-line2').value.trim(),
+    latitude: document.getElementById('e-lat').value.trim(),
+    longitude: document.getElementById('e-lng').value.trim(),
+    notes: document.getElementById('e-notes').value.trim(),
+    favorite: _temple.Favorite,
+    onVisitList: _temple.OnVisitList,
+  };
+  if (!payload.name) { msg.innerHTML = '<p class="field-error">Temple name is required.</p>'; return; }
+  try {
+    await postAction('updateTemple', payload);
+    document.getElementById('edit-form-wrap').style.display = 'none';
+    loadTemple();
+  } catch (err) {
+    msg.innerHTML = '<p class="field-error">Could not save. Please try again.</p>';
+  }
+}
+
+async function deleteTemple() {
+  if (!confirm(`Delete ${_temple.Name}? This also deletes all its Visits. This cannot be undone.`)) return;
+  await postAction('deleteTemple', { id: _temple.Id });
+  window.location.href = 'temples.html';
+}
+
+async function loadTemple() {
+  const content = document.getElementById('content');
+  await initPage('temples.html');
+  const id = Number(new URLSearchParams(window.location.search).get('id'));
+  if (!id) { content.innerHTML = '<p class="note">No temple specified.</p>'; return; }
+
+  try {
+    const [templesRes, visitsRes, vocab] = await Promise.all([
+      fetchData('temples'), fetchData('visits', { templeId: id }), getVocab().catch(() => ({ statuses: [] })),
+    ]);
+    const t = (templesRes.temples || []).find(x => x.Id === id);
+    if (!t) { content.innerHTML = '<p class="note">Temple not found.</p>'; return; }
+    _temple = t;
+    const visits = visitsRes.visits || [];
+    const peopleTogether = new Set();
+    visits.forEach(v => (v.WhoWith || []).forEach(p => peopleTogether.add(p.Id)));
+    const groundsVisits = visits.filter(v => (v.Purposes || []).includes('Temple Grounds')).length;
+    const workVisits = visits.filter(v => (v.WorkPerformed || []).length > 0).length;
+    const tourVisits = visits.filter(v => (v.Purposes || []).some(p => p === 'Open House' || p === 'Tour')).length;
+
+    const addr = [t.StreetAddress, t.AddressLine2, [t.City, t.StateRegion].filter(Boolean).join(', '), t.PostalCode, t.Country]
+      .filter(Boolean).join(', ');
+
+    let html = `
+      <div class="card">
+        <div class="detail-header">
+          <div>
+            <h2 style="margin-bottom:0.2rem">${escapeHtml(t.Name)}</h2>
+            <p class="meta">${statusBadge(t)}</p>
+            ${addr ? `<p class="meta">${escapeHtml(addr)}</p>` : ''}
+            ${t.Phone ? `<p class="meta">${escapeHtml(t.Phone)}</p>` : ''}
+            ${t.Website ? `<p class="meta"><a href="${escapeHtml(t.Website)}" target="_blank" rel="noopener">${escapeHtml(t.Website)}</a></p>` : ''}
+          </div>
+        </div>
+        <div class="detail-actions">
+          <a class="btn" href="visit-edit.html?templeId=${t.Id}">Quick Log</a>
+          <a class="btn secondary" href="${mapsUrl(t)}" target="_blank" rel="noopener">Navigate</a>
+          <button type="button" class="btn secondary" onclick="toggleFavorite()">${t.Favorite ? 'Unfavorite' : 'Favorite'}</button>
+          <button type="button" class="btn secondary" onclick="toggleVisitList()">${t.OnVisitList ? 'Remove from Visit List' : 'Add to My Visit List'}</button>
+          <button type="button" class="btn secondary" onclick="openEditForm()">Edit Temple</button>
+          <button type="button" class="btn secondary" onclick="deleteTemple()">Delete Temple</button>
+        </div>
+      </div>
+
+      ${statRowHtml([
+        { num: t.VisitCount, label: 'Total Visits' },
+        { num: t.FirstVisitDate ? formatDate(t.FirstVisitDate) : '—', label: 'First Visit' },
+        { num: t.LastVisitDate ? formatDate(t.LastVisitDate) : '—', label: 'Most Recent Visit' },
+        { num: workVisits, label: 'Ordinance Visits' },
+        { num: groundsVisits, label: 'Grounds Visits' },
+        { num: tourVisits, label: 'Open Houses / Tours' },
+        { num: peopleTogether.size, label: 'People Visited With' },
+      ])}
+
+      ${t.Notes ? `<div class="card"><h3>Notes</h3><p style="white-space:pre-wrap">${escapeHtml(t.Notes)}</p></div>` : ''}
+
+      <div id="edit-form-wrap" class="card" style="display:none">
+        <h3>Edit Temple</h3>
+        <form id="edit-form">
+          <div class="form-row">
+            <div><label for="e-name">Temple Name</label><input id="e-name" required></div>
+            <div><label for="e-shortname">Short Name</label><input id="e-shortname"></div>
+          </div>
+          <label for="e-status">Status</label>
+          <select id="e-status">${(vocab.statuses || []).map(s => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('')}</select>
+          <div class="form-row">
+            <div><label for="e-street">Street Address</label><input id="e-street"></div>
+            <div><label for="e-line2">Address Line 2</label><input id="e-line2"></div>
+          </div>
+          <div class="form-row">
+            <div><label for="e-city">City</label><input id="e-city"></div>
+            <div><label for="e-state">State / Region</label><input id="e-state"></div>
+          </div>
+          <div class="form-row">
+            <div><label for="e-postal">Postal Code</label><input id="e-postal"></div>
+            <div><label for="e-country">Country</label><input id="e-country"></div>
+          </div>
+          <div class="form-row">
+            <div><label for="e-website">Website</label><input id="e-website" type="url"></div>
+            <div><label for="e-phone">Phone Number</label><input id="e-phone" type="tel"></div>
+          </div>
+          <div class="form-row">
+            <div><label for="e-lat">Latitude</label><input id="e-lat" type="number" step="any"></div>
+            <div><label for="e-lng">Longitude</label><input id="e-lng" type="number" step="any"></div>
+          </div>
+          <label for="e-notes">Notes</label>
+          <textarea id="e-notes" rows="3" placeholder="Parking, entrance, accessibility notes..."></textarea>
+          <div id="edit-msg"></div>
+          <div class="form-actions">
+            <button type="submit" class="btn">Save Changes</button>
+            <button type="button" class="btn secondary" onclick="document.getElementById('edit-form-wrap').style.display='none'">Cancel</button>
+          </div>
+        </form>
+      </div>
+
+      <h2>Recent Visits</h2>
+    `;
+
+    if (!visits.length) {
+      html += emptyStateHtml('No visits to this temple yet.', '',
+        `<p><a class="btn" href="visit-edit.html?templeId=${t.Id}">Quick Log Your First Visit</a></p>`);
+    } else {
+      html += `<div class="card-grid">${visits.slice(0, 10).map(visitCardHtml).join('')}</div>`;
+    }
+
+    content.innerHTML = html;
+    document.getElementById('edit-form').addEventListener('submit', submitEditTemple);
+  } catch (err) {
+    handleError(content, err);
+  }
+}
+loadTemple();
+</script>
+</body>
+</html>

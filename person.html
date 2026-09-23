@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Person — Temple Time</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="bar">
+    <h1>Temple Time</h1>
+    <nav id="site-nav"></nav>
+    <div class="header-right"><button class="btn secondary" id="logout-btn">Log Out</button></div>
+  </div>
+</header>
+
+<main>
+  <p><a href="people.html">&larr; All People</a></p>
+  <div id="content"><p class="note">Loading...</p></div>
+</main>
+
+<script src="js/api.js"></script>
+<script src="js/app.js"></script>
+<script>
+let _person = null;
+
+function openEditForm() {
+  const p = _person;
+  const wrap = document.getElementById('edit-form-wrap');
+  wrap.style.display = 'block';
+  document.getElementById('e-first').value = p.FirstName || '';
+  document.getElementById('e-last').value = p.LastName || '';
+  document.getElementById('e-display').value = p.DisplayName || '';
+  document.getElementById('e-rel').value = p.Relationship || '';
+  document.getElementById('e-notes').value = p.Notes || '';
+  document.getElementById('e-active').checked = !!p.Active;
+  wrap.scrollIntoView({ behavior: 'smooth' });
+}
+
+async function submitEditPerson(ev) {
+  ev.preventDefault();
+  const msg = document.getElementById('edit-msg');
+  const payload = {
+    id: _person.Id,
+    firstName: document.getElementById('e-first').value.trim(),
+    lastName: document.getElementById('e-last').value.trim(),
+    displayName: document.getElementById('e-display').value.trim(),
+    relationship: document.getElementById('e-rel').value,
+    notes: document.getElementById('e-notes').value.trim(),
+    active: document.getElementById('e-active').checked,
+  };
+  if (!payload.firstName) { msg.innerHTML = '<p class="field-error">First name is required.</p>'; return; }
+  try {
+    await postAction('updatePerson', payload);
+    document.getElementById('edit-form-wrap').style.display = 'none';
+    loadPerson();
+  } catch (err) {
+    msg.innerHTML = '<p class="field-error">Could not save. Please try again.</p>';
+  }
+}
+
+async function deletePerson() {
+  const name = _person.DisplayName || _person.FirstName;
+  if (!confirm(`Delete ${name}? This removes them from any past Visits. This cannot be undone.`)) return;
+  await postAction('deletePerson', { id: _person.Id });
+  window.location.href = 'people.html';
+}
+
+async function loadPerson() {
+  const content = document.getElementById('content');
+  await initPage('people.html');
+  const id = Number(new URLSearchParams(window.location.search).get('id'));
+  if (!id) { content.innerHTML = '<p class="note">No person specified.</p>'; return; }
+
+  try {
+    const [peopleRes, visitsRes, vocab] = await Promise.all([
+      fetchData('people'), fetchData('visits'), getVocab().catch(() => ({ relationships: [] })),
+    ]);
+    const p = (peopleRes.people || []).find(x => x.Id === id);
+    if (!p) { content.innerHTML = '<p class="note">Person not found.</p>'; return; }
+    _person = p;
+    const name = p.DisplayName || [p.FirstName, p.LastName].filter(Boolean).join(' ');
+    const together = (visitsRes.visits || []).filter(v => (v.WhoWith || []).some(w => w.Id === id));
+    together.sort((a, b) => b.VisitDate.localeCompare(a.VisitDate));
+    const temples = new Set(together.map(v => v.TempleId));
+    const firstVisit = together.length ? together[together.length - 1].VisitDate : null;
+    const lastVisit = together.length ? together[0].VisitDate : null;
+
+    let html = `
+      <div class="card">
+        <div class="detail-header">
+          <div>
+            <h2 style="margin-bottom:0.2rem">${escapeHtml(name)}${!p.Active ? ' <span class="meta">(Inactive)</span>' : ''}</h2>
+            <p class="meta">${escapeHtml(p.Relationship || '')}</p>
+          </div>
+        </div>
+        <div class="detail-actions">
+          <button type="button" class="btn secondary" onclick="openEditForm()">Edit Person</button>
+          <button type="button" class="btn secondary" onclick="deletePerson()">Delete Person</button>
+        </div>
+        ${p.Notes ? `<p style="white-space:pre-wrap">${escapeHtml(p.Notes)}</p>` : ''}
+      </div>
+
+      ${statRowHtml([
+        { num: together.length, label: 'Total Visits Together' },
+        { num: temples.size, label: 'Different Temples Together' },
+        { num: firstVisit ? formatDate(firstVisit) : '—', label: 'First Visit Together' },
+        { num: lastVisit ? formatDate(lastVisit) : '—', label: 'Most Recent Visit Together' },
+      ])}
+
+      <div id="edit-form-wrap" class="card" style="display:none">
+        <h3>Edit Person</h3>
+        <form id="edit-form">
+          <div class="form-row">
+            <div><label for="e-first">First Name</label><input id="e-first" required></div>
+            <div><label for="e-last">Last Name</label><input id="e-last"></div>
+          </div>
+          <div class="form-row">
+            <div><label for="e-display">Preferred / Display Name</label><input id="e-display"></div>
+            <div><label for="e-rel">Relationship</label>
+              <select id="e-rel"><option value="">—</option>${(vocab.relationships || []).map(r => `<option value="${escapeHtml(r)}">${escapeHtml(r)}</option>`).join('')}</select>
+            </div>
+          </div>
+          <label for="e-notes">Notes</label>
+          <textarea id="e-notes" rows="2"></textarea>
+          <p><label class="checkbox"><input type="checkbox" id="e-active"> Active</label></p>
+          <div id="edit-msg"></div>
+          <div class="form-actions">
+            <button type="submit" class="btn">Save Changes</button>
+            <button type="button" class="btn secondary" onclick="document.getElementById('edit-form-wrap').style.display='none'">Cancel</button>
+          </div>
+        </form>
+      </div>
+
+      <h2>Recent Visits Together</h2>
+    `;
+
+    html += together.length
+      ? `<div class="card-grid">${together.slice(0, 10).map(visitCardHtml).join('')}</div>`
+      : emptyStateHtml('No shared visits yet.', '', '');
+
+    content.innerHTML = html;
+    document.getElementById('edit-form').addEventListener('submit', submitEditPerson);
+  } catch (err) {
+    handleError(content, err);
+  }
+}
+loadPerson();
+</script>
+</body>
+</html>

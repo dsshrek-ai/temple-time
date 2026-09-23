@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Visit — Temple Time</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="bar">
+    <h1>Temple Time</h1>
+    <nav id="site-nav"></nav>
+    <div class="header-right"><button class="btn secondary" id="logout-btn">Log Out</button></div>
+  </div>
+</header>
+
+<main>
+  <p><a href="visits.html">&larr; All Visits</a></p>
+  <div id="content"><p class="note">Loading...</p></div>
+</main>
+
+<script src="js/api.js"></script>
+<script src="js/app.js"></script>
+<script>
+let _visit = null;
+let _temple = null;
+
+async function deleteVisit() {
+  if (!confirm(`Delete this Visit to ${_visit.TempleName}? This cannot be undone.`)) return;
+  await postAction('deleteVisit', { id: _visit.Id });
+  window.location.href = 'visits.html';
+}
+
+function field(label, value) {
+  if (!value) return '';
+  return `<p><strong>${escapeHtml(label)}:</strong> ${value}</p>`;
+}
+
+async function loadVisit() {
+  const content = document.getElementById('content');
+  await initPage('visits.html');
+  const id = Number(new URLSearchParams(window.location.search).get('id'));
+  if (!id) { content.innerHTML = '<p class="note">No visit specified.</p>'; return; }
+
+  try {
+    const visitsRes = await fetchData('visits');
+    const v = (visitsRes.visits || []).find(x => x.Id === id);
+    if (!v) { content.innerHTML = '<p class="note">Visit not found.</p>'; return; }
+    _visit = v;
+
+    const templesRes = await fetchData('temples');
+    _temple = (templesRes.temples || []).find(t => t.Id === v.TempleId);
+
+    const loc = [v.TempleCity, v.TempleState].filter(Boolean).join(', ');
+    const who = (v.WhoWith || []).map(p => escapeHtml(p.Name)).join(', ');
+    const work = workShorthand(v.WorkPerformed);
+
+    let html = `
+      <div class="card">
+        <div class="detail-header">
+          <div>
+            <h2 style="margin-bottom:0.2rem">${escapeHtml(v.TempleName)}${v.FavoriteVisit ? ' ★' : ''}</h2>
+            <p class="meta">${escapeHtml(formatDate(v.VisitDate))}${loc ? ' · ' + escapeHtml(loc) : ''}</p>
+          </div>
+        </div>
+        <div class="detail-actions">
+          <a class="btn" href="visit-edit.html?id=${v.Id}">Edit Visit</a>
+          <a class="btn secondary" href="visit-edit.html?duplicateOf=${v.Id}">Duplicate as New Visit</a>
+          ${_temple ? `<a class="btn secondary" href="${mapsUrl(_temple)}" target="_blank" rel="noopener">Navigate to Temple</a>` : ''}
+          <a class="btn secondary" href="temple.html?id=${v.TempleId}">View Temple</a>
+          <button type="button" class="btn secondary" onclick="deleteVisit()">Delete Visit</button>
+        </div>
+
+        ${field('Who With', who)}
+        ${field('Group', v.GroupName ? escapeHtml(v.GroupName) : '')}
+        ${field('Visit Purpose', (v.Purposes || []).length ? escapeHtml(v.Purposes.join(', ')) : '')}
+        ${field('Work Performed', work ? `${escapeHtml(v.WorkPerformed.join(', '))} <span class="work-shorthand">${escapeHtml(work)}</span>` : '')}
+        ${field('Arrival', v.ArrivalTime ? formatTime(v.ArrivalTime) : '')}
+        ${field('Departure', v.DepartureTime ? formatTime(v.DepartureTime) : '')}
+      </div>
+
+      ${v.Notes ? `<div class="card journal-section"><h3>Notes</h3><p>${escapeHtml(v.Notes)}</p></div>` : ''}
+      ${v.SpiritualImpressions ? `<div class="card journal-section"><h3>Spiritual Impressions</h3><p>${escapeHtml(v.SpiritualImpressions)}</p></div>` : ''}
+      ${v.MemorableExperiences ? `<div class="card journal-section"><h3>Memorable Experiences</h3><p>${escapeHtml(v.MemorableExperiences)}</p></div>` : ''}
+      ${v.PeopleEncountered ? `<div class="card journal-section"><h3>People Encountered</h3><p>${escapeHtml(v.PeopleEncountered)}</p></div>` : ''}
+      ${(v.Tags || []).length ? `<div class="card journal-section"><h3>Tags</h3><p>${v.Tags.map(t => `<span class="tag-pill">${escapeHtml(t)}</span>`).join('')}</p></div>` : ''}
+    `;
+
+    content.innerHTML = html;
+  } catch (err) {
+    handleError(content, err);
+  }
+}
+loadVisit();
+</script>
+</body>
+</html>

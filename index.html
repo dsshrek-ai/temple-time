@@ -10,65 +10,77 @@
 <header class="site-header">
   <div class="bar">
     <h1>Temple Time</h1>
-    <nav>
-      <a href="index.html" aria-current="page">Dashboard</a>
-    </nav>
+    <nav id="site-nav"></nav>
+    <div class="header-right"><button class="btn secondary" id="logout-btn">Log Out</button></div>
   </div>
 </header>
 
 <main>
-  <div id="content">
-    <p class="note">Loading...</p>
-  </div>
+  <div id="content"><p class="note">Loading...</p></div>
 </main>
 
 <script src="js/api.js"></script>
+<script src="js/app.js"></script>
 <script>
 async function loadDashboard() {
   const content = document.getElementById('content');
-  await captureSso();
+  await initPage('index.html');
   try {
-    const [templesRes, visitsRes] = await Promise.all([
-      fetchData('temples'),
-      fetchData('visits'),
-    ]);
+    const [templesRes, visitsRes] = await Promise.all([fetchData('temples'), fetchData('visits')]);
     const temples = templesRes.temples || [];
     const visits = visitsRes.visits || [];
-    const differentTemples = new Set(visits.map(v => v.TempleId)).size;
+
+    if (temples.length === 0) {
+      content.innerHTML = emptyStateHtml(
+        'Welcome to Temple Time',
+        'Begin building your temple journey.',
+        `<p><a class="btn" href="temples.html?add=1">Add Your First Temple</a></p>`
+      );
+      return;
+    }
+
     const thisYear = new Date().getFullYear();
     const visitsThisYear = visits.filter(v => v.VisitDate && v.VisitDate.startsWith(String(thisYear))).length;
+    const differentTemples = new Set(visits.map(v => v.TempleId)).size;
+    const streak = currentWeeklyStreak(visits.map(v => v.VisitDate));
+    const visitList = temples.filter(t => t.OnVisitList);
 
     let html = `
-      <div class="stat-row">
-        <div class="stat-card"><div class="num">${visits.length}</div><div class="label">Total Visits</div></div>
-        <div class="stat-card"><div class="num">${differentTemples}</div><div class="label">Different Temples</div></div>
-        <div class="stat-card"><div class="num">${visitsThisYear}</div><div class="label">Visits This Year</div></div>
-        <div class="stat-card"><div class="num">${temples.length}</div><div class="label">Temples Tracked</div></div>
+      <div class="quick-actions">
+        <a class="btn" href="visit-edit.html">Quick Log</a>
+        <span class="btn disabled" title="Coming in Phase 3">Plan a Visit</span>
+        <a class="btn secondary" href="temples.html?add=1">Add Temple</a>
+        <a class="btn secondary" href="temples.html?view=visitlist">View My Visit List</a>
+        <span class="btn disabled" title="Coming in Phase 5">Nearby Temples</span>
+        <span class="btn disabled" title="Coming in Phase 2">Photo Gallery</span>
       </div>
     `;
 
-    if (temples.length === 0) {
-      html += `
-        <div class="empty-state card">
-          <h3>Welcome to Temple Time</h3>
-          <p>Begin building your temple journey.</p>
-          <p class="note">The full Add Temple / Quick Log screens are coming in the next build pass — this page currently confirms the backend (login, Temples, Visits) is wired up correctly.</p>
-        </div>`;
+    html += statRowHtml([
+      { num: visits.length, label: 'Total Visits' },
+      { num: differentTemples, label: 'Different Temples' },
+      { num: visitsThisYear, label: 'Visits This Year' },
+      { num: streak, label: 'Current Weekly Streak' },
+    ]);
+
+    if (visitList.length) {
+      html += `<div class="card">
+        <h3>My Visit List</h3>
+        <p class="meta">${visitList.slice(0, 6).map(t => escapeHtml(t.Name)).join(' · ')}${visitList.length > 6 ? ` +${visitList.length - 6} more` : ''}</p>
+        <p><a href="temples.html?view=visitlist">View all &rarr;</a></p>
+      </div>`;
+    }
+
+    html += `<h2>Recent Visits</h2>`;
+    if (!visits.length) {
+      html += emptyStateHtml(
+        'No temple visits have been recorded yet.',
+        '',
+        `<p><a class="btn" href="visit-edit.html">Quick Log Your First Visit</a></p>`
+      );
     } else {
-      html += `<h2>Temples</h2><div class="card-grid">`;
-      for (const t of temples) {
-        const loc = [t.City, t.StateRegion].filter(Boolean).join(', ');
-        html += `
-          <div class="click-card">
-            <div class="thumb"></div>
-            <div class="body">
-              <p class="title">${escapeHtml(t.Name)}${t.Favorite ? ' ★' : ''}</p>
-              <p class="meta">${escapeHtml(loc)}</p>
-              <p class="meta">${t.VisitCount} visit${t.VisitCount === 1 ? '' : 's'}${t.LastVisitDate ? ' · last ' + escapeHtml(t.LastVisitDate) : ''}</p>
-            </div>
-          </div>`;
-      }
-      html += `</div>`;
+      html += `<div class="card-grid">${visits.slice(0, 10).map(visitCardHtml).join('')}</div>`;
+      if (visits.length > 10) html += `<p><a href="visits.html">View all Visits &rarr;</a></p>`;
     }
 
     content.innerHTML = html;

@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Visits — Temple Time</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="bar">
+    <h1>Temple Time</h1>
+    <nav id="site-nav"></nav>
+    <div class="header-right"><button class="btn secondary" id="logout-btn">Log Out</button></div>
+  </div>
+</header>
+
+<main>
+  <div id="content"><p class="note">Loading...</p></div>
+</main>
+
+<script src="js/api.js"></script>
+<script src="js/app.js"></script>
+<script>
+let _visits = [];
+let _firstTimeVisitIds = new Set();
+let _view = 'all';
+
+const VIEWS = [
+  { key: 'all', label: 'All Visits' },
+  { key: 'thisyear', label: 'This Year' },
+  { key: 'favorites', label: 'Favorites' },
+  { key: 'work', label: 'Temple Work' },
+  { key: 'grounds', label: 'Temple Grounds' },
+  { key: 'firsttime', label: 'First-Time Temples' },
+];
+
+function matchesView(v, view) {
+  const thisYear = new Date().getFullYear();
+  switch (view) {
+    case 'thisyear': return v.VisitDate && v.VisitDate.startsWith(String(thisYear));
+    case 'favorites': return v.FavoriteVisit;
+    case 'work': return (v.Purposes || []).includes('Temple Work');
+    case 'grounds': return (v.Purposes || []).includes('Temple Grounds');
+    case 'firsttime': return _firstTimeVisitIds.has(v.Id);
+    default: return true;
+  }
+}
+
+function renderList() {
+  const search = (document.getElementById('v-search').value || '').toLowerCase();
+  const templeId = document.getElementById('v-temple').value;
+  let list = _visits.filter(v => matchesView(v, _view));
+  if (templeId) list = list.filter(v => String(v.TempleId) === templeId);
+  if (search) {
+    list = list.filter(v => [
+      v.TempleName, v.TempleCity, v.TempleState, v.Notes, v.MemorableExperiences,
+      v.GroupName, (v.Tags || []).join(' '), (v.WhoWith || []).map(p => p.Name).join(' '),
+    ].filter(Boolean).join(' ').toLowerCase().includes(search));
+  }
+  const grid = document.getElementById('v-grid');
+  grid.innerHTML = list.length
+    ? `<div class="card-grid">${list.map(visitCardHtml).join('')}</div>`
+    : emptyStateHtml('No records match these filters.', '',
+        `<p><button type="button" class="btn secondary" onclick="document.getElementById('v-search').value='';document.getElementById('v-temple').value='';renderList()">Clear Filters</button></p>`);
+}
+
+function renderTabs() {
+  document.getElementById('v-tabs').innerHTML = VIEWS.map(v =>
+    `<button type="button" class="${v.key === _view ? 'active' : ''}" data-view="${v.key}">${escapeHtml(v.label)}</button>`
+  ).join('');
+  document.querySelectorAll('#v-tabs button').forEach(btn => {
+    btn.addEventListener('click', () => { _view = btn.dataset.view; renderTabs(); renderList(); });
+  });
+}
+
+async function loadVisits() {
+  const content = document.getElementById('content');
+  await initPage('visits.html');
+
+  try {
+    const [visitsRes, templesRes] = await Promise.all([fetchData('visits'), fetchData('temples')]);
+    _visits = visitsRes.visits || [];
+    const temples = templesRes.temples || [];
+
+    // First-time: the earliest (oldest) Visit per Temple.
+    const earliestByTemple = {};
+    _visits.forEach(v => {
+      if (!earliestByTemple[v.TempleId] || v.VisitDate < earliestByTemple[v.TempleId].VisitDate) {
+        earliestByTemple[v.TempleId] = v;
+      }
+    });
+    _firstTimeVisitIds = new Set(Object.values(earliestByTemple).map(v => v.Id));
+
+    if (!_visits.length) {
+      content.innerHTML = emptyStateHtml('No temple visits have been recorded yet.', '',
+        `<p><a class="btn" href="visit-edit.html">Quick Log Your First Visit</a></p>`);
+      return;
+    }
+
+    content.innerHTML = `
+      <h2>Visits</h2>
+      <div class="filter-bar">
+        <a class="btn" href="visit-edit.html">+ Quick Log</a>
+        <input type="text" id="v-search" placeholder="Search temple, notes, people, tags...">
+        <select id="v-temple">
+          <option value="">All Temples</option>
+          ${temples.map(t => `<option value="${t.Id}">${escapeHtml(t.Name)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="view-tabs" id="v-tabs"></div>
+      <div id="v-grid"></div>
+    `;
+    document.getElementById('v-search').addEventListener('input', renderList);
+    document.getElementById('v-temple').addEventListener('change', renderList);
+    renderTabs();
+    renderList();
+  } catch (err) {
+    handleError(content, err);
+  }
+}
+loadVisits();
+</script>
+</body>
+</html>

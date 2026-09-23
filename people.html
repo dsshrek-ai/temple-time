@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>People — Temple Time</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="bar">
+    <h1>Temple Time</h1>
+    <nav id="site-nav"></nav>
+    <div class="header-right"><button class="btn secondary" id="logout-btn">Log Out</button></div>
+  </div>
+</header>
+
+<main>
+  <div id="content"><p class="note">Loading...</p></div>
+</main>
+
+<script src="js/api.js"></script>
+<script src="js/app.js"></script>
+<script>
+let _people = [];
+let _view = 'all';
+const FAMILY = ['Spouse', 'Child', 'Grandchild', 'Parent', 'Sibling', 'Other Family'];
+const CHURCH = ['Church Friend', 'Ward Member'];
+
+const VIEWS = [
+  { key: 'all', label: 'All' },
+  { key: 'family', label: 'Family' },
+  { key: 'friends', label: 'Friends' },
+  { key: 'church', label: 'Church' },
+  { key: 'inactive', label: 'Inactive' },
+];
+
+function matchesView(p, view) {
+  switch (view) {
+    case 'family': return FAMILY.includes(p.Relationship) && p.Active;
+    case 'friends': return p.Relationship === 'Friend' && p.Active;
+    case 'church': return CHURCH.includes(p.Relationship) && p.Active;
+    case 'inactive': return !p.Active;
+    default: return p.Active;
+  }
+}
+
+function renderList() {
+  const search = (document.getElementById('p-search').value || '').toLowerCase();
+  let list = _people.filter(p => matchesView(p, _view));
+  if (search) {
+    list = list.filter(p => [p.FirstName, p.LastName, p.DisplayName].filter(Boolean).join(' ').toLowerCase().includes(search));
+  }
+  list.sort((a, b) => a.FirstName.localeCompare(b.FirstName));
+  const grid = document.getElementById('p-grid');
+  grid.innerHTML = list.length
+    ? `<div class="card-grid">${list.map(personCardHtml).join('')}</div>`
+    : emptyStateHtml('No records match these filters.', '',
+        `<p><button type="button" class="btn secondary" onclick="document.getElementById('p-search').value='';renderList()">Clear Filters</button></p>`);
+}
+
+function renderTabs() {
+  document.getElementById('p-tabs').innerHTML = VIEWS.map(v =>
+    `<button type="button" class="${v.key === _view ? 'active' : ''}" data-view="${v.key}">${escapeHtml(v.label)}</button>`
+  ).join('');
+  document.querySelectorAll('#p-tabs button').forEach(btn => {
+    btn.addEventListener('click', () => { _view = btn.dataset.view; renderTabs(); renderList(); });
+  });
+}
+
+async function submitAddPerson(ev) {
+  ev.preventDefault();
+  const msg = document.getElementById('add-msg');
+  const payload = {
+    firstName: document.getElementById('pp-first').value.trim(),
+    lastName: document.getElementById('pp-last').value.trim(),
+    displayName: document.getElementById('pp-display').value.trim(),
+    relationship: document.getElementById('pp-rel').value,
+    notes: document.getElementById('pp-notes').value.trim(),
+    active: true,
+  };
+  if (!payload.firstName) { msg.innerHTML = '<p class="field-error">First name is required.</p>'; return; }
+  try {
+    const res = await postAction('addPerson', payload);
+    window.location.href = `person.html?id=${res.id}`;
+  } catch (err) {
+    msg.innerHTML = '<p class="field-error">Could not save. Please try again.</p>';
+  }
+}
+
+async function loadPeople() {
+  const content = document.getElementById('content');
+  await initPage('people.html');
+  const vocab = await getVocab().catch(() => ({ relationships: [] }));
+
+  content.innerHTML = `
+    <h2>People</h2>
+    <div id="add-form-wrap" class="card" style="display:none">
+      <h3>Add Person</h3>
+      <form id="add-form">
+        <div class="form-row">
+          <div><label for="pp-first">First Name</label><input id="pp-first" required></div>
+          <div><label for="pp-last">Last Name</label><input id="pp-last"></div>
+        </div>
+        <div class="form-row">
+          <div><label for="pp-display">Preferred / Display Name</label><input id="pp-display"></div>
+          <div><label for="pp-rel">Relationship</label>
+            <select id="pp-rel"><option value="">—</option>${(vocab.relationships || []).map(r => `<option value="${escapeHtml(r)}">${escapeHtml(r)}</option>`).join('')}</select>
+          </div>
+        </div>
+        <label for="pp-notes">Notes</label>
+        <textarea id="pp-notes" rows="2"></textarea>
+        <div id="add-msg"></div>
+        <div class="form-actions">
+          <button type="submit" class="btn">Save Person</button>
+          <button type="button" class="btn secondary" onclick="document.getElementById('add-form-wrap').style.display='none'">Cancel</button>
+        </div>
+      </form>
+    </div>
+    <div class="filter-bar">
+      <button type="button" class="btn" id="add-person-btn">+ Add Person</button>
+      <input type="text" id="p-search" placeholder="Search by name...">
+    </div>
+    <div class="view-tabs" id="p-tabs"></div>
+    <div id="p-grid"></div>
+  `;
+
+  document.getElementById('add-form').addEventListener('submit', submitAddPerson);
+  document.getElementById('add-person-btn').addEventListener('click', () => {
+    document.getElementById('add-form-wrap').style.display = 'block';
+    document.getElementById('pp-first').focus();
+  });
+  document.getElementById('p-search').addEventListener('input', renderList);
+
+  try {
+    const res = await fetchData('people');
+    _people = res.people || [];
+    if (!_people.length) {
+      document.getElementById('p-grid').innerHTML = emptyStateHtml('No people added yet', 'Add the people you share temple visits with.', '');
+      document.getElementById('p-tabs').style.display = 'none';
+    } else {
+      renderTabs();
+      renderList();
+    }
+  } catch (err) {
+    handleError(document.getElementById('p-grid'), err);
+  }
+}
+loadPeople();
+</script>
+</body>
+</html>

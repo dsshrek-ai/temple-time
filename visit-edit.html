@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Log a Visit — Temple Time</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="bar">
+    <h1>Temple Time</h1>
+    <nav id="site-nav"></nav>
+    <div class="header-right"><button class="btn secondary" id="logout-btn">Log Out</button></div>
+  </div>
+</header>
+
+<main>
+  <div id="content"><p class="note">Loading...</p></div>
+</main>
+
+<script src="js/api.js"></script>
+<script src="js/app.js"></script>
+<script>
+let _editingId = null;
+
+function todayStr() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function checkGroupHtml(name, options, checkedValues, idPrefix) {
+  return `<div class="check-group">${options.map((o, i) => `
+    <label><input type="checkbox" name="${name}" value="${escapeHtml(o.value)}" id="${idPrefix}-${i}"
+      ${checkedValues.includes(o.value) ? 'checked' : ''}> ${escapeHtml(o.label)}</label>
+  `).join('')}</div>`;
+}
+
+function getCheckedValues(name) {
+  return Array.from(document.querySelectorAll(`input[name="${name}"]:checked`)).map(el => el.value);
+}
+
+async function submitForm(ev) {
+  ev.preventDefault();
+  const msg = document.getElementById('form-msg');
+  msg.innerHTML = '';
+  const templeId = Number(document.getElementById('ve-temple').value);
+  const visitDate = document.getElementById('ve-date').value;
+  if (!templeId) { msg.innerHTML = '<p class="field-error">Temple is required.</p>'; return; }
+  if (!visitDate) { msg.innerHTML = '<p class="field-error">Visit Date is required.</p>'; return; }
+
+  const payload = {
+    templeId,
+    visitDate,
+    groupName: document.getElementById('ve-group').value.trim(),
+    purposes: getCheckedValues('purpose'),
+    workPerformed: getCheckedValues('work'),
+    personIds: getCheckedValues('whowith').map(Number),
+    arrivalTime: document.getElementById('ve-arrival').value,
+    departureTime: document.getElementById('ve-departure').value,
+    notes: document.getElementById('ve-notes').value.trim(),
+    spiritualImpressions: document.getElementById('ve-spiritual').value.trim(),
+    memorableExperiences: document.getElementById('ve-memorable').value.trim(),
+    peopleEncountered: document.getElementById('ve-encountered').value.trim(),
+    tags: document.getElementById('ve-tags').value.split(',').map(t => t.trim()).filter(Boolean),
+    favoriteVisit: document.getElementById('ve-favorite').checked,
+  };
+
+  try {
+    let id;
+    if (_editingId) {
+      payload.id = _editingId;
+      await postAction('updateVisit', payload);
+      id = _editingId;
+    } else {
+      const res = await postAction('addVisit', payload);
+      id = res.id;
+    }
+    window.location.href = `visit.html?id=${id}`;
+  } catch (err) {
+    msg.innerHTML = '<p class="field-error">Could not save. Please try again.</p>';
+  }
+}
+
+async function deleteFromForm() {
+  if (!confirm('Delete this Visit? This cannot be undone.')) return;
+  await postAction('deleteVisit', { id: _editingId });
+  window.location.href = 'visits.html';
+}
+
+async function loadForm() {
+  const content = document.getElementById('content');
+  await initPage('visits.html');
+  const params = new URLSearchParams(window.location.search);
+  const idParam = params.get('id');
+  const templeIdParam = params.get('templeId');
+  const duplicateOf = params.get('duplicateOf');
+  _editingId = idParam ? Number(idParam) : null;
+
+  try {
+    const [templesRes, peopleRes, vocab] = await Promise.all([
+      fetchData('temples'), fetchData('people'), getVocab(),
+    ]);
+    const temples = templesRes.temples || [];
+    const people = (peopleRes.people || []).filter(p => p.Active);
+
+    if (!temples.length) {
+      content.innerHTML = emptyStateHtml('Add a temple first', 'You need at least one Temple before you can log a Visit.',
+        `<p><a class="btn" href="temples.html?add=1">Add Temple</a></p>`);
+      return;
+    }
+
+    let existing = null;
+    let title = 'Quick Log';
+    let expandDetails = false;
+    let preselectTempleId = templeIdParam ? Number(templeIdParam) : (temples[0] ? temples[0].Id : null);
+    let preselectDate = todayStr();
+    let preselectWho = [];
+    let preselectGroup = '';
+    let preselectPurposes = [];
+    let preselectWork = [];
+
+    if (_editingId) {
+      const visitsRes = await fetchData('visits');
+      existing = (visitsRes.visits || []).find(v => v.Id === _editingId);
+      if (!existing) { content.innerHTML = '<p class="note">Visit not found.</p>'; return; }
+      title = 'Edit Visit';
+      preselectTempleId = existing.TempleId;
+      preselectDate = existing.VisitDate;
+      preselectWho = (existing.WhoWith || []).map(p => String(p.Id));
+      preselectGroup = existing.GroupName || '';
+      preselectPurposes = existing.Purposes || [];
+      preselectWork = existing.WorkPerformed || [];
+      expandDetails = !!(existing.ArrivalTime || existing.DepartureTime || existing.Notes ||
+        existing.SpiritualImpressions || existing.MemorableExperiences || existing.PeopleEncountered ||
+        (existing.Tags || []).length || existing.FavoriteVisit);
+    } else if (duplicateOf) {
+      const visitsRes = await fetchData('visits');
+      const src = (visitsRes.visits || []).find(v => v.Id === Number(duplicateOf));
+      if (src) {
+        title = 'New Visit (duplicated)';
+        preselectTempleId = src.TempleId;
+        preselectWho = (src.WhoWith || []).map(p => String(p.Id));
+        preselectGroup = src.GroupName || '';
+        preselectPurposes = src.Purposes || [];
+        // Work Performed intentionally not carried forward -- ordinance work
+        // typically differs visit to visit even at the same temple.
+      }
+    }
+
+    content.innerHTML = `
+      <h2>${title}</h2>
+      <form id="visit-form" class="card">
+        <label for="ve-temple">Temple</label>
+        <select id="ve-temple" required>
+          ${temples.map(t => `<option value="${t.Id}" ${t.Id === preselectTempleId ? 'selected' : ''}>${escapeHtml(t.Name)}</option>`).join('')}
+        </select>
+
+        <label for="ve-date">Date</label>
+        <input type="date" id="ve-date" value="${preselectDate}" required>
+
+        <label>Who With</label>
+        ${people.length
+          ? checkGroupHtml('whowith', people.map(p => ({ value: String(p.Id), label: p.DisplayName || [p.FirstName, p.LastName].filter(Boolean).join(' ') })), preselectWho, 'ww')
+          : `<p class="note">No People yet — <a href="people.html">add some</a> to select them here.</p>`}
+
+        <label for="ve-group">Group</label>
+        <input type="text" id="ve-group" value="${escapeHtml(preselectGroup)}" placeholder="Ward Youth, Family Group...">
+
+        <label>Visit Purpose</label>
+        ${checkGroupHtml('purpose', (vocab.purposes || []).map(p => ({ value: p, label: p })), preselectPurposes, 'pp')}
+
+        <label>Work Performed</label>
+        ${checkGroupHtml('work', (vocab.workTypes || []).map(w => ({ value: w, label: w })), preselectWork, 'wk')}
+
+        <p><button type="button" class="toggle-more" id="toggle-more">${expandDetails ? '− Hide Details' : '+ Add More Details'}</button></p>
+
+        <div id="more-details" style="display:${expandDetails ? 'block' : 'none'}">
+          <div class="form-row">
+            <div><label for="ve-arrival">Arrival Time</label><input type="time" id="ve-arrival" value="${existing?.ArrivalTime || ''}"></div>
+            <div><label for="ve-departure">Departure Time</label><input type="time" id="ve-departure" value="${existing?.DepartureTime || ''}"></div>
+          </div>
+          <label for="ve-notes">Notes</label>
+          <textarea id="ve-notes" rows="2">${escapeHtml(existing?.Notes || '')}</textarea>
+          <label for="ve-spiritual">Spiritual Impressions</label>
+          <textarea id="ve-spiritual" rows="2">${escapeHtml(existing?.SpiritualImpressions || '')}</textarea>
+          <label for="ve-memorable">Memorable Experiences</label>
+          <textarea id="ve-memorable" rows="2">${escapeHtml(existing?.MemorableExperiences || '')}</textarea>
+          <label for="ve-encountered">People Encountered</label>
+          <textarea id="ve-encountered" rows="2">${escapeHtml(existing?.PeopleEncountered || '')}</textarea>
+          <label for="ve-tags">Tags (comma separated)</label>
+          <input type="text" id="ve-tags" value="${escapeHtml((existing?.Tags || []).join(', '))}" placeholder="Family, Anniversary, Vacation...">
+          <p><label class="checkbox"><input type="checkbox" id="ve-favorite" ${existing?.FavoriteVisit ? 'checked' : ''}> Favorite Visit</label></p>
+        </div>
+
+        <div id="form-msg"></div>
+        <div class="form-actions">
+          <button type="submit" class="btn">Save Visit</button>
+          <a class="btn secondary" href="${_editingId ? `visit.html?id=${_editingId}` : 'visits.html'}">Cancel</a>
+          ${_editingId ? `<button type="button" class="btn secondary" id="delete-btn">Delete Visit</button>` : ''}
+        </div>
+      </form>
+    `;
+
+    document.getElementById('toggle-more').addEventListener('click', () => {
+      const div = document.getElementById('more-details');
+      const btn = document.getElementById('toggle-more');
+      const show = div.style.display === 'none';
+      div.style.display = show ? 'block' : 'none';
+      btn.textContent = show ? '− Hide Details' : '+ Add More Details';
+    });
+    document.getElementById('visit-form').addEventListener('submit', submitForm);
+    if (_editingId) document.getElementById('delete-btn').addEventListener('click', deleteFromForm);
+  } catch (err) {
+    handleError(content, err);
+  }
+}
+loadForm();
+</script>
+</body>
+</html>

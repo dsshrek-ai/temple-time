@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Temples — Temple Time</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="bar">
+    <h1>Temple Time</h1>
+    <nav id="site-nav"></nav>
+    <div class="header-right"><button class="btn secondary" id="logout-btn">Log Out</button></div>
+  </div>
+</header>
+
+<main>
+  <div id="content"><p class="note">Loading...</p></div>
+</main>
+
+<script src="js/api.js"></script>
+<script src="js/app.js"></script>
+<script>
+let _temples = [];
+let _view = 'all';
+
+const VIEWS = [
+  { key: 'all', label: 'All Temples' },
+  { key: 'visited', label: 'Visited' },
+  { key: 'notvisited', label: 'Not Yet Visited' },
+  { key: 'visitlist', label: 'My Visit List' },
+  { key: 'favorites', label: 'Favorites' },
+];
+
+function matchesView(t, view) {
+  switch (view) {
+    case 'visited': return t.Visited;
+    case 'notvisited': return !t.Visited;
+    case 'visitlist': return t.OnVisitList;
+    case 'favorites': return t.Favorite;
+    default: return true;
+  }
+}
+
+function renderList() {
+  const search = (document.getElementById('t-search').value || '').toLowerCase();
+  const sort = document.getElementById('t-sort').value;
+  let list = _temples.filter(t => matchesView(t, _view));
+  if (search) {
+    list = list.filter(t =>
+      [t.Name, t.City, t.StateRegion, t.Country].filter(Boolean).join(' ').toLowerCase().includes(search)
+    );
+  }
+  list = list.slice().sort((a, b) => {
+    if (sort === 'recent') return (b.LastVisitDate || '').localeCompare(a.LastVisitDate || '');
+    if (sort === 'frequent') return b.VisitCount - a.VisitCount;
+    if (sort === 'city') return (a.City || '').localeCompare(b.City || '');
+    return a.Name.localeCompare(b.Name);
+  });
+
+  const grid = document.getElementById('t-grid');
+  if (!list.length) {
+    grid.innerHTML = emptyStateHtml('No records match these filters.', '',
+      `<p><button type="button" class="btn secondary" onclick="document.getElementById('t-search').value='';renderList()">Clear Filters</button></p>`);
+    return;
+  }
+  grid.innerHTML = `<div class="card-grid">${list.map(templeCardHtml).join('')}</div>`;
+}
+
+function renderTabs() {
+  document.getElementById('t-tabs').innerHTML = VIEWS.map(v =>
+    `<button type="button" class="${v.key === _view ? 'active' : ''}" data-view="${v.key}">${escapeHtml(v.label)}</button>`
+  ).join('');
+  document.querySelectorAll('#t-tabs button').forEach(btn => {
+    btn.addEventListener('click', () => { _view = btn.dataset.view; renderTabs(); renderList(); });
+  });
+}
+
+function openAddForm() {
+  document.getElementById('add-form-wrap').style.display = 'block';
+  document.getElementById('t-name').focus();
+}
+
+async function submitAddTemple(ev) {
+  ev.preventDefault();
+  const msg = document.getElementById('add-msg');
+  msg.textContent = '';
+  const payload = {
+    name: document.getElementById('t-name').value.trim(),
+    shortName: document.getElementById('t-shortname').value.trim(),
+    status: document.getElementById('t-status').value,
+    streetAddress: document.getElementById('t-street').value.trim(),
+    city: document.getElementById('t-city').value.trim(),
+    stateRegion: document.getElementById('t-state').value.trim(),
+    postalCode: document.getElementById('t-postal').value.trim(),
+    country: document.getElementById('t-country').value.trim(),
+    latitude: document.getElementById('t-lat').value.trim(),
+    longitude: document.getElementById('t-lng').value.trim(),
+    website: document.getElementById('t-website').value.trim(),
+    phone: document.getElementById('t-phone').value.trim(),
+    favorite: document.getElementById('t-favorite').checked,
+    onVisitList: document.getElementById('t-visitlist').checked,
+  };
+  if (!payload.name) { msg.innerHTML = '<p class="field-error">Temple name is required.</p>'; return; }
+  try {
+    const res = await postAction('addTemple', payload);
+    window.location.href = `temple.html?id=${res.id}`;
+  } catch (err) {
+    msg.innerHTML = '<p class="field-error">Could not save. Please try again.</p>';
+  }
+}
+
+async function loadTemples() {
+  const content = document.getElementById('content');
+  await initPage('temples.html');
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('view') === 'visitlist') _view = 'visitlist';
+
+  const vocab = await getVocab().catch(() => ({ statuses: [] }));
+
+  content.innerHTML = `
+    <h2>Temples</h2>
+    <div id="add-form-wrap" class="card" style="display:none">
+      <h3>Add Temple</h3>
+      <form id="add-form">
+        <div class="form-row">
+          <div><label for="t-name">Temple Name</label><input id="t-name" required></div>
+          <div><label for="t-shortname">Short Name</label><input id="t-shortname"></div>
+        </div>
+        <label for="t-status">Status</label>
+        <select id="t-status">${(vocab.statuses || []).map(s => `<option value="${escapeHtml(s)}"${s === 'Operating' ? ' selected' : ''}>${escapeHtml(s)}</option>`).join('')}</select>
+        <div class="form-row">
+          <div><label for="t-street">Street Address</label><input id="t-street"></div>
+          <div><label for="t-city">City</label><input id="t-city"></div>
+        </div>
+        <div class="form-row">
+          <div><label for="t-state">State / Region</label><input id="t-state"></div>
+          <div><label for="t-postal">Postal Code</label><input id="t-postal"></div>
+        </div>
+        <div class="form-row">
+          <div><label for="t-country">Country</label><input id="t-country"></div>
+          <div><label for="t-website">Website</label><input id="t-website" type="url"></div>
+        </div>
+        <label for="t-phone">Phone Number</label><input id="t-phone" type="tel">
+        <div class="form-row">
+          <div><label for="t-lat">Latitude</label><input id="t-lat" type="number" step="any"></div>
+          <div><label for="t-lng">Longitude</label><input id="t-lng" type="number" step="any"></div>
+        </div>
+        <p>
+          <label class="checkbox"><input type="checkbox" id="t-favorite"> Favorite</label>
+          <label class="checkbox"><input type="checkbox" id="t-visitlist"> Add to My Visit List</label>
+        </p>
+        <div id="add-msg"></div>
+        <div class="form-actions">
+          <button type="submit" class="btn">Save Temple</button>
+          <button type="button" class="btn secondary" onclick="document.getElementById('add-form-wrap').style.display='none'">Cancel</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="filter-bar">
+      <button type="button" class="btn" id="add-temple-btn">+ Add Temple</button>
+      <input type="text" id="t-search" placeholder="Search name, city, state, country...">
+      <select id="t-sort">
+        <option value="name">Sort: Temple Name</option>
+        <option value="recent">Sort: Most Recently Visited</option>
+        <option value="frequent">Sort: Most Frequently Visited</option>
+        <option value="city">Sort: City</option>
+      </select>
+    </div>
+    <div class="view-tabs" id="t-tabs"></div>
+    <div id="t-grid"></div>
+  `;
+
+  document.getElementById('add-form').addEventListener('submit', submitAddTemple);
+  document.getElementById('add-temple-btn').addEventListener('click', openAddForm);
+  document.getElementById('t-search').addEventListener('input', renderList);
+  document.getElementById('t-sort').addEventListener('change', renderList);
+
+  if (params.get('add') === '1') openAddForm();
+
+  try {
+    const res = await fetchData('temples');
+    _temples = res.temples || [];
+    if (!_temples.length) {
+      document.getElementById('t-grid').innerHTML = emptyStateHtml(
+        'No temples yet',
+        'Add the temples you want to track.',
+        ''
+      );
+      document.getElementById('t-tabs').style.display = 'none';
+    } else {
+      renderTabs();
+      renderList();
+    }
+  } catch (err) {
+    handleError(document.getElementById('t-grid'), err);
+  }
+}
+loadTemples();
+</script>
+</body>
+</html>
