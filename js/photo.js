@@ -99,7 +99,7 @@ function photoCardHtml(p) {
   const meta = [p.TempleName, p.VisitDate ? formatDate(p.VisitDate) : null].filter(Boolean).join(' · ');
   return `
     <a class="click-card" href="photo.html?id=${p.Id}">
-      <img class="thumb" src="${escapeHtml(p.ThumbUrl)}" alt="${escapeHtml(p.Caption || '')}" loading="lazy">
+      <img class="thumb" src="${escapeHtml(p.ThumbUrl)}" alt="${escapeHtml(p.Caption || '')}">
       <div class="body">
         ${meta ? `<p class="meta">${escapeHtml(meta)}</p>` : ''}
         ${p.Caption ? `<p class="meta">${escapeHtml(p.Caption)}</p>` : ''}

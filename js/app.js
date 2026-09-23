@@ -85,8 +85,14 @@ function whoWithSummary(whoWith) {
 // ---- Cards ----
 
 function thumbTagHtml(url, alt) {
+  // No loading="lazy" -- iOS Safari has a known bug where a page with
+  // several lazy-loaded images (a grid of card thumbnails is exactly this
+  // shape) can miscalculate the scrollable page height, so the page stops
+  // scrolling partway down and cuts off real content below. These are
+  // already small pre-resized (~450px) thumbnails, so eager loading them
+  // costs little.
   return url
-    ? `<img class="thumb" src="${escapeHtml(url)}" alt="${escapeHtml(alt || '')}" loading="lazy">`
+    ? `<img class="thumb" src="${escapeHtml(url)}" alt="${escapeHtml(alt || '')}">`
     : `<div class="thumb"></div>`;
 }
 
