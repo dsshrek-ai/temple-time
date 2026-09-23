@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Share — Temple Time</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="bar">
+    <h1>Temple Time</h1>
+    <nav id="site-nav"></nav>
+    <div class="header-right"><button class="btn secondary" id="logout-btn">Log Out</button></div>
+  </div>
+</header>
+
+<main>
+  <h2>Share</h2>
+  <div id="share-card" class="card"><p class="note">Loading...</p></div>
+  <div class="card">
+    <h3>Import from a Share Code</h3>
+    <p class="meta">Got a code from someone else? Enter it here to add their Temples (and Plans, if they included them) to your own list.</p>
+    <form id="import-form">
+      <label for="import-code">Share Code</label>
+      <input type="text" id="import-code" maxlength="8" style="text-transform:uppercase" placeholder="e.g. AB3DE7GH" required>
+      <div id="import-msg"></div>
+      <div class="form-actions">
+        <button type="submit" class="btn">Import</button>
+      </div>
+    </form>
+  </div>
+</main>
+
+<script src="js/api.js"></script>
+<script src="js/app.js"></script>
+<script>
+function formatExpiry(ts) {
+  if (!ts) return '';
+  const [datePart, timePart] = ts.split(' ');
+  const timeStr = timePart ? timePart.slice(0, 5) : null;
+  return `${formatDate(datePart)}${timeStr ? ' · ' + formatTime(timeStr) : ''}`;
+}
+
+async function renderShareCard() {
+  const card = document.getElementById('share-card');
+  card.innerHTML = '<p class="note">Loading...</p>';
+  try {
+    const res = await fetchData('myShareCode');
+    if (res.share) {
+      const s = res.share;
+      card.innerHTML = `
+        <h3>Share My Temple List</h3>
+        <p>Give this code to another Temple Time user:</p>
+        <p style="font-size:1.8rem;font-weight:700;letter-spacing:0.15em;text-align:center;padding:0.5rem;background:var(--tint);border-radius:var(--radius)">${escapeHtml(s.code)}</p>
+        <p class="meta">Expires ${escapeHtml(formatExpiry(s.expiresAt))}, or as soon as it's used -- whichever comes first.</p>
+        <p class="meta">${s.includePlans ? 'Includes your upcoming Plans.' : 'Temples only (Plans not included).'}</p>
+        <div class="form-actions">
+          <button type="button" class="btn secondary" id="copy-code-btn">Copy Code</button>
+          <button type="button" class="btn secondary" id="cancel-code-btn">Cancel This Code</button>
+        </div>
+      `;
+      document.getElementById('copy-code-btn').addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(s.code);
+          document.getElementById('copy-code-btn').textContent = 'Copied!';
+          setTimeout(() => { document.getElementById('copy-code-btn').textContent = 'Copy Code'; }, 2000);
+        } catch (e) { /* clipboard API unavailable -- the code is already shown on screen */ }
+      });
+      document.getElementById('cancel-code-btn').addEventListener('click', async () => {
+        if (!confirm('Cancel this share code? Anyone you already gave it to will no longer be able to use it.')) return;
+        await postAction('cancelShareCode', {});
+        renderShareCard();
+      });
+    } else {
+      card.innerHTML = `
+        <h3>Share My Temple List</h3>
+        <p class="meta">Generates a one-time code another Temple Time user can enter to add your Temples to their own list. Temples with the exact same name they already have are skipped, not overwritten. Your Visits and People are never shared.</p>
+        <p><label class="checkbox"><input type="checkbox" id="include-plans-check"> Also include my upcoming Plans</label></p>
+        <div class="form-actions">
+          <button type="button" class="btn" id="generate-code-btn">Generate Share Code</button>
+        </div>
+      `;
+      document.getElementById('generate-code-btn').addEventListener('click', async () => {
+        const includePlans = document.getElementById('include-plans-check').checked;
+        await postAction('createShareCode', { includePlans });
+        renderShareCard();
+      });
+    }
+  } catch (err) {
+    handleError(card, err);
+  }
+}
+
+async function submitImport(ev) {
+  ev.preventDefault();
+  const msg = document.getElementById('import-msg');
+  const code = document.getElementById('import-code').value.trim().toUpperCase();
+  msg.innerHTML = '';
+  try {
+    const res = await postAction('importFromShareCode', { code });
+    const bits = [`Added ${res.addedTemples} Temple${res.addedTemples === 1 ? '' : 's'}`];
+    if (res.skippedTemples) bits.push(`skipped ${res.skippedTemples} already in your list`);
+    if (res.includePlans) bits.push(`added ${res.addedPlans} Plan${res.addedPlans === 1 ? '' : 's'}`);
+    msg.innerHTML = `<p class="note">${escapeHtml(bits.join(', '))}.</p>`;
+    document.getElementById('import-code').value = '';
+  } catch (err) {
+    msg.innerHTML = `<p class="field-error">${escapeHtml(err.message || 'Could not import that code.')}</p>`;
+  }
+}
+
+async function loadShare() {
+  await initPage('share.html');
+  document.getElementById('import-form').addEventListener('submit', submitImport);
+  renderShareCard();
+}
+loadShare();
+</script>
+</body>
+</html>

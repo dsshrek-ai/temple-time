@@ -97,6 +97,18 @@ WHERE u.username = 'you@example.com' AND a.app_key = 'temple-time';
 3. No server action needed for the Add to Google Calendar date-math fix --
    pure front-end, live as soon as you push to GitHub and Pages redeploys.
 
+## 7. Phase 6: enable Sharing
+
+1. Run the "PHASE 6: SHARING" section of `api/schema.sql` in phpMyAdmin
+   (adds `tt_share_codes`). Same ordering rule as Phases 2/3 -- run before
+   re-uploading `api.php`.
+2. Re-upload `api/api.php` by FTP. No new `config.php` values needed --
+   Sharing reuses the existing `PHOTO_UPLOAD_DIR`/`PHOTO_BASE_URL` config
+   to copy a shared Temple's Primary Photo (if Photos aren't configured,
+   the Temple still imports, just without a photo).
+3. Front end (`share.html` + the "Share My List" link on `temples.html`)
+   is live as soon as you push to GitHub and Pages redeploys.
+
 ## Re-deploying after a change
 
 - Front end (`index.html`, `style.css`, `js/*.js`): push to GitHub, Pages

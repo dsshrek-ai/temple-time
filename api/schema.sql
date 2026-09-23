@@ -282,6 +282,22 @@ ALTER TABLE tt_visits ADD COLUMN plan_id INT NULL,
 -- temple.
 ALTER TABLE tt_plans ADD COLUMN appointment_scheduled TINYINT(1) NOT NULL DEFAULT 0;
 
+-- ---------- PHASE 6: SHARING ----------
+-- Run once. A share code is single-use (deleted by api.php the moment
+-- it's redeemed) and expires 48h after creation regardless -- see
+-- TempleTime.md 18.1. `code` is a short random string (8 chars,
+-- unambiguous alphabet -- see genShareCode() in api.php), typed by hand by
+-- the recipient, so it's the primary key rather than an auto-increment id.
+
+CREATE TABLE IF NOT EXISTS tt_share_codes (
+  code           CHAR(8) PRIMARY KEY,
+  user_id        INT NOT NULL,
+  include_plans  TINYINT(1) NOT NULL DEFAULT 0,
+  created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  expires_at     TIMESTAMP NOT NULL,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- ============================================================
 -- BOOTSTRAP (run once, after you've signed up through My Apps Hub):
 --

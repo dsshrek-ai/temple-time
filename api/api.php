@@ -1076,6 +1076,251 @@ function setVisitCoverPhoto(int $userId, int $visitId, ?int $photoId): void {
   $stmt->close();
 }
 
+// ---- Sharing (see TempleTime.md 18.1) ----
+
+const SHARE_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no 0/O/1/I/L -- avoids misreads when typed by hand
+const SHARE_CODE_LENGTH = 8;
+const SHARE_CODE_LIFETIME_HOURS = 48;
+
+function genShareCode(): string {
+  $alphabet = SHARE_CODE_ALPHABET;
+  $max = strlen($alphabet) - 1;
+  for ($attempt = 0; $attempt < 20; $attempt++) {
+    $code = '';
+    for ($i = 0; $i < SHARE_CODE_LENGTH; $i++) {
+      $code .= $alphabet[random_int(0, $max)];
+    }
+    $chk = db()->prepare('SELECT 1 FROM tt_share_codes WHERE code = ?');
+    $chk->bind_param('s', $code);
+    $chk->execute();
+    $taken = (bool)$chk->get_result()->fetch_row();
+    $chk->close();
+    if (!$taken) { return $code; }
+  }
+  fail('Could not generate a share code, please try again.', 500);
+}
+
+// One active code per user -- creating a new one replaces any existing one.
+function createShareCode(int $userId, bool $includePlans): array {
+  $conn = db();
+  $del = $conn->prepare('DELETE FROM tt_share_codes WHERE user_id = ?');
+  $del->bind_param('i', $userId);
+  $del->execute();
+  $del->close();
+
+  $code = genShareCode();
+  $hours = SHARE_CODE_LIFETIME_HOURS;
+  $stmt = $conn->prepare(
+    'INSERT INTO tt_share_codes (code, user_id, include_plans, expires_at)
+     VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL ? HOUR))'
+  );
+  $includePlansInt = $includePlans ? 1 : 0;
+  $stmt->bind_param('siii', $code, $userId, $includePlansInt, $hours);
+  $stmt->execute();
+  $stmt->close();
+
+  return ['code' => $code, 'includePlans' => $includePlans, 'lifetimeHours' => $hours];
+}
+
+function myShareCode(int $userId): ?array {
+  $stmt = db()->prepare('SELECT code, include_plans, expires_at FROM tt_share_codes WHERE user_id = ? AND expires_at > NOW()');
+  $stmt->bind_param('i', $userId);
+  $stmt->execute();
+  $row = $stmt->get_result()->fetch_assoc();
+  $stmt->close();
+  if (!$row) { return null; }
+  return ['code' => $row['code'], 'includePlans' => (bool)$row['include_plans'], 'expiresAt' => $row['expires_at']];
+}
+
+function cancelShareCode(int $userId): void {
+  $stmt = db()->prepare('DELETE FROM tt_share_codes WHERE user_id = ?');
+  $stmt->bind_param('i', $userId);
+  $stmt->execute();
+  $stmt->close();
+}
+
+// Physically copies a Photo's two files to a fresh filename pair and
+// inserts a new tt_photos row owned by $newUserId, attached to
+// $newTempleId. Each user ends up with their own independent copy of the
+// image bytes -- simpler and safer than reference-counting a shared file
+// across two users' rows (see TempleTime.md 18.1). Returns the new photo's
+// id, or null if PHOTO_UPLOAD_DIR isn't configured or the source files are
+// missing -- either way the caller just proceeds without a Primary Photo
+// rather than failing the whole import over a missing picture.
+function copyPhotoForShare(int $sourcePhotoId, int $newUserId, int $newTempleId): ?int {
+  if (!photosConfigured()) { return null; }
+
+  $stmt = db()->prepare('SELECT image_path, thumb_path, caption, original_filename FROM tt_photos WHERE id = ?');
+  $stmt->bind_param('i', $sourcePhotoId);
+  $stmt->execute();
+  $src = $stmt->get_result()->fetch_assoc();
+  $stmt->close();
+  if (!$src) { return null; }
+
+  $dir = rtrim(PHOTO_UPLOAD_DIR, '/');
+  $token = bin2hex(random_bytes(16));
+  $newImagePath = $token . '.jpg';
+  $newThumbPath = $token . '_thumb.jpg';
+
+  if (!@copy($dir . '/' . $src['image_path'], $dir . '/' . $newImagePath)) { return null; }
+  if (!@copy($dir . '/' . $src['thumb_path'], $dir . '/' . $newThumbPath)) {
+    @unlink($dir . '/' . $newImagePath);
+    return null;
+  }
+
+  $stmt = db()->prepare(
+    'INSERT INTO tt_photos (user_id, temple_id, image_path, thumb_path, original_filename, caption)
+     VALUES (?, ?, ?, ?, ?, ?)'
+  );
+  $stmt->bind_param('iissss', $newUserId, $newTempleId, $newImagePath, $newThumbPath, $src['original_filename'], $src['caption']);
+  $stmt->execute();
+  $newId = $stmt->insert_id;
+  $stmt->close();
+  return $newId;
+}
+
+function importFromShareCode(int $recipientUserId, string $code): array {
+  $conn = db();
+
+  $stmt = $conn->prepare('SELECT user_id, include_plans FROM tt_share_codes WHERE code = ? AND expires_at > NOW()');
+  $stmt->bind_param('s', $code);
+  $stmt->execute();
+  $share = $stmt->get_result()->fetch_assoc();
+  $stmt->close();
+  if (!$share) { fail('That share code is invalid or has expired.'); }
+
+  $sharerUserId = (int)$share['user_id'];
+  $includePlans = (bool)$share['include_plans'];
+  if ($sharerUserId === $recipientUserId) { fail("You can't import your own share code."); }
+
+  $addedTemples = 0;
+  $skippedTemples = 0;
+  $addedPlans = 0;
+
+  $conn->begin_transaction();
+  try {
+    // Recipient's existing Temple names, for exact-match dedup.
+    $stmt = $conn->prepare('SELECT id, name FROM tt_temples WHERE user_id = ?');
+    $stmt->bind_param('i', $recipientUserId);
+    $stmt->execute();
+    $existingByName = [];
+    $res = $stmt->get_result();
+    while ($r = $res->fetch_assoc()) { $existingByName[$r['name']] = (int)$r['id']; }
+    $stmt->close();
+
+    $stmt = $conn->prepare('SELECT * FROM tt_temples WHERE user_id = ?');
+    $stmt->bind_param('i', $sharerUserId);
+    $stmt->execute();
+    $sharerTemples = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+    $stmt->close();
+
+    // Maps the sharer's temple_id -> the recipient's temple_id (whether
+    // newly created or an existing exact-name match), so shared Plans
+    // always have somewhere to attach.
+    $templeIdMap = [];
+
+    foreach ($sharerTemples as $t) {
+      if (isset($existingByName[$t['name']])) {
+        $templeIdMap[$t['id']] = $existingByName[$t['name']];
+        $skippedTemples++;
+        continue;
+      }
+
+      $ins = $conn->prepare(
+        'INSERT INTO tt_temples (user_id, name, short_name, status, street_address, address_line2,
+           city, state_region, postal_code, country, latitude, longitude, phone, website, notes,
+           favorite, on_visit_list)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,0)'
+      );
+      $ins->bind_param(
+        'isssssssssddsss',
+        $recipientUserId, $t['name'], $t['short_name'], $t['status'], $t['street_address'], $t['address_line2'],
+        $t['city'], $t['state_region'], $t['postal_code'], $t['country'], $t['latitude'], $t['longitude'],
+        $t['phone'], $t['website'], $t['notes']
+      );
+      $ins->execute();
+      $newTempleId = $ins->insert_id;
+      $ins->close();
+
+      $templeIdMap[$t['id']] = $newTempleId;
+      $addedTemples++;
+
+      if ($t['primary_photo_id'] !== null) {
+        $newPhotoId = copyPhotoForShare((int)$t['primary_photo_id'], $recipientUserId, $newTempleId);
+        if ($newPhotoId !== null) {
+          $upd = $conn->prepare('UPDATE tt_temples SET primary_photo_id = ? WHERE id = ?');
+          $upd->bind_param('ii', $newPhotoId, $newTempleId);
+          $upd->execute();
+          $upd->close();
+        }
+      }
+    }
+
+    if ($includePlans) {
+      $stmt = $conn->prepare("SELECT * FROM tt_plans WHERE user_id = ? AND status = 'Planned'");
+      $stmt->bind_param('i', $sharerUserId);
+      $stmt->execute();
+      $sharerPlans = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+      $stmt->close();
+
+      foreach ($sharerPlans as $p) {
+        if (!isset($templeIdMap[$p['temple_id']])) { continue; } // defensive -- every sharer Temple was just mapped above
+        $newTempleId = $templeIdMap[$p['temple_id']];
+
+        $ins = $conn->prepare(
+          "INSERT INTO tt_plans (user_id, temple_id, planned_date, planned_time, end_time, group_name, notes, status, appointment_scheduled)
+           VALUES (?,?,?,?,?,?,?,'Planned',0)"
+        );
+        $ins->bind_param(
+          'iisssss',
+          $recipientUserId, $newTempleId, $p['planned_date'], $p['planned_time'], $p['end_time'], $p['group_name'], $p['notes']
+        );
+        $ins->execute();
+        $newPlanId = $ins->insert_id;
+        $ins->close();
+
+        $srcPurposes = $conn->prepare('SELECT purpose FROM tt_plan_purposes WHERE plan_id = ?');
+        $srcPurposes->bind_param('i', $p['id']);
+        $srcPurposes->execute();
+        $purposeRes = $srcPurposes->get_result();
+        $insP = $conn->prepare('INSERT INTO tt_plan_purposes (plan_id, purpose) VALUES (?, ?)');
+        while ($pr = $purposeRes->fetch_assoc()) {
+          $insP->bind_param('is', $newPlanId, $pr['purpose']);
+          $insP->execute();
+        }
+        $srcPurposes->close();
+
+        $srcWork = $conn->prepare('SELECT work_type FROM tt_plan_work WHERE plan_id = ?');
+        $srcWork->bind_param('i', $p['id']);
+        $srcWork->execute();
+        $workRes = $srcWork->get_result();
+        $insW = $conn->prepare('INSERT INTO tt_plan_work (plan_id, work_type) VALUES (?, ?)');
+        while ($wr = $workRes->fetch_assoc()) {
+          $insW->bind_param('is', $newPlanId, $wr['work_type']);
+          $insW->execute();
+        }
+        $srcWork->close();
+
+        // Who With is intentionally not copied -- the recipient's People
+        // table is a separate, personal roster (TempleTime.md 18.1).
+        $addedPlans++;
+      }
+    }
+
+    $del = $conn->prepare('DELETE FROM tt_share_codes WHERE code = ?');
+    $del->bind_param('s', $code);
+    $del->execute();
+    $del->close();
+
+    $conn->commit();
+  } catch (Throwable $e) {
+    $conn->rollback();
+    fail('Could not import that share code: ' . $e->getMessage(), 500);
+  }
+
+  return ['addedTemples' => $addedTemples, 'skippedTemples' => $skippedTemples, 'includePlans' => $includePlans, 'addedPlans' => $addedPlans];
+}
+
 // ---- Router ----
 
 $method = $_SERVER['REQUEST_METHOD'];
@@ -1269,6 +1514,32 @@ switch ($action) {
     $photoId = isset($body['photoId']) && $body['photoId'] !== null ? (int)$body['photoId'] : null;
     setVisitCoverPhoto((int)$user['id'], $visitId, $photoId);
     respond(['ok' => true]);
+  }
+
+  // -- Sharing --
+
+  case 'myShareCode': {
+    $user = requireMember();
+    respond(['ok' => true, 'share' => myShareCode((int)$user['id'])]);
+  }
+
+  case 'createShareCode': {
+    $user = requireMember();
+    $includePlans = !empty($body['includePlans']);
+    respond(['ok' => true] + createShareCode((int)$user['id'], $includePlans));
+  }
+
+  case 'cancelShareCode': {
+    $user = requireMember();
+    cancelShareCode((int)$user['id']);
+    respond(['ok' => true]);
+  }
+
+  case 'importFromShareCode': {
+    $user = requireMember();
+    $code = strtoupper(trim((string)($body['code'] ?? '')));
+    if ($code === '') { fail('Enter a share code.'); }
+    respond(['ok' => true] + importFromShareCode((int)$user['id'], $code));
   }
 
   // -- MyDataWorld login (shared with the other apps) --

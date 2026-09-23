@@ -10,7 +10,7 @@ shared `users`/`sessions` login via **My Apps Hub** SSO. Multi-user: anyone
 granted access can log in, but every row is scoped by `user_id`, so each
 person's Temples/Visits/People/Plans/Photos stay private to them.
 
-## Status: Phases 1-3 live; Phase 4 built (pure front end, no deploy steps beyond pushing)
+## Status: Phases 1-4 live; Phase 6 built, pending deployment (Phase 5 skipped for now)
 
 - [x] Phase 0 -- project foundation, schema, API auth skeleton
 - [x] Phase 1 -- Temples, People, Visits CRUD + full front end (Dashboard,
@@ -61,12 +61,25 @@ person's Temples/Visits/People/Plans/Photos stay private to them.
       renderer used throughout, so this didn't need a charting library.
       Deferred (spec marks these optional/future anyway): Visit Calendar
       view, Activity Heat Map, Year in Review.
-- [ ] Phase 5 -- Search, filters, Nearby Temples, polish
-- [ ] Phase 6 -- Share Temple List (and Planned Visits, once Phase 3 exists)
-      with another Temple Time user via an in-app share code -- design in
-      `TempleTime.md` section 18.1. Needs a `deletePhoto` reference-count
-      fix (see that section) before Photos can be safely linked, not
-      duplicated, between two users' Temples.
+- [ ] Phase 5 -- deliberately skipped for now (search/filters/Nearby
+      Temples polish). Nothing built depends on it; pick back up anytime.
+- [x] Phase 6 (built, not deployed) -- Share Temple List, and optionally
+      upcoming Plans, with another Temple Time user via an in-app share
+      code (`share.html`) -- final design in `TempleTime.md` 18.1. No
+      export file, no text message: `createShareCode`/`importFromShareCode`
+      read and merge directly between the two users' rows in the shared
+      database. Single-use, expires after 48h or explicit cancel
+      (`tt_share_codes`). Dedup by exact Temple Name match, as decided;
+      Favorite/On My Visit List always start unset on the copy. A shared
+      Temple's Primary Photo is **copied** (new file, new `tt_photos` row)
+      rather than linked -- each user ends up with an independent copy, no
+      `deletePhoto` reference-counting needed (the original design in
+      18.1 called for linking a shared file; simplified after discussing
+      it). Plans are opt-in at share time and copy Purposes/Work/Planned
+      Date-Time-End Time/Group/Notes; **Who With is dropped** since the
+      recipient's People table is separate. Visits are never touched.
+      Entry point: "Share My List" button on `temples.html`. See
+      `SETUP.md` section 7 to enable.
 
 See `SETUP.md` for deployment steps.
 
@@ -84,6 +97,9 @@ See `SETUP.md` for deployment steps.
   for multi-select Planned Purpose (`tt_plan_purposes`), Planned Work
   (`tt_plan_work`), Who With (`tt_plan_people`), and a nullable `plan_id`
   on `tt_visits` (set by "Log This Visit")
+- `tt_share_codes` -- one row per active share code (Phase 6); `code` (the
+  primary key) is what the recipient types in, `include_plans` is the
+  sharer's opt-in choice, `expires_at` enforces the 48h window
 
 See the comments at the top of `api/schema.sql` for the full history of
 additive changes.
@@ -168,3 +184,23 @@ to matter:
 - Dashboard's existing summary cards (Total Visits, Different Temples,
   etc.) aren't yet linked through to Statistics -- spec section 6.4 says
   "clickable where practical," not done for Phase 4.
+
+## Known Phase 6 simplifications
+
+- No subset picker -- sharing always offers **all** of your Temples, not
+  just Favorites/On My Visit List or a hand-picked selection.
+- No preview before accepting an import -- it applies immediately and
+  shows a receipt (Added/skipped counts) afterward, not a "review these
+  changes first" step.
+- Only a Temple's **Primary Photo** transfers, not its full gallery, and
+  never Visit photos -- those are personal memories, not part of the
+  Temple record being shared.
+- Plan sharing always drops **Who With** -- the recipient's People table
+  is a separate personal roster, and guessing at name matches seemed more
+  surprising than leaving it blank for the recipient to fill in.
+- One active share code per user at a time -- generating a new one
+  replaces (and immediately invalidates) any earlier one, there's no way
+  to have two different codes live simultaneously (e.g. one with Plans,
+  one without).
+- No admin/history view of past share codes or who redeemed what -- a
+  code is deleted the moment it's used or expires, nothing is retained.
