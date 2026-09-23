@@ -1586,14 +1586,13 @@ Future Temple Time capabilities may include:
 - Mileage and travel costs
 - Hotel information
 - Driving-route planning
-- Temple Memories Book generation
-- PDF and print export
 - Year-in-Review book pages
 - Map of temples visited
 - Higher-resolution selected book Photos
 - More advanced Nearby Temple planning
 - Recurring temple Plans
-- Share Temple List with another user (see 18.1)
+- Share Temple List with another user (decided, see 18.1)
+- Memory Book PDF export (decided, see 18.2)
 
 These features should build on the core data already established in the first version.
 
@@ -1654,6 +1653,57 @@ operation, not an export/import of a document:
 **Deliberately out of scope for v1:** a subset picker for which Temples to
 share, previewing the import before it applies, and sharing anything
 beyond Temples + (optionally) Plans.
+
+---
+
+## 18.2 Memory Book PDF Export
+
+Decided 2026-09-26 (Phase 7). Generates a PDF booklet -- title page plus
+one section per Visit (Temple, Date, Who With, Group, Purpose, Work
+Performed, journal entries, Photos) -- from three different filtered
+views of the user's own Visits, all reusing data a page already has
+loaded rather than adding new queries:
+
+1. **From a Person's detail page:** every Visit that Person was Who With
+   on.
+2. **From a Temple's detail page:** every Visit to that Temple.
+3. **From the Statistics page:** every Visit in whatever Reporting Period
+   is currently selected there (This Month/This Year/Last Year/All Time/
+   Custom Range) -- so a date-range book is just "pick your range on
+   Statistics, then export," not a separate picker.
+
+**Generation is entirely client-side**, via jsPDF loaded from a CDN --
+this app's only external dependency. No new schema, no new API action:
+the button hands whatever Visit list (and the user's full Photos list, to
+be grouped by Visit) the page already fetched to a single shared builder.
+
+**Layout:** a centered title page (title + subtitle + generated-date
+footer), then one new PDF page per Visit, sorted chronologically,
+containing: Temple name and date/location as a heading, a meta block (Who
+With, Group, Purpose, Work Performed with its shorthand, Arrival/
+Departure), then Notes / Spiritual Impressions / Memorable Experiences /
+People Encountered / Tags as labeled paragraphs (only the ones that have
+content), then that Visit's Photos in a 2-column grid using each Photo's
+standard (1600px) image.
+
+**Photos require a CORS header on the photo host.** Embedding a Photo
+means fetching it and reading it back out of an off-screen canvas
+(`loadImageForBook()` in `js/book.js`), which browsers block unless the
+server sends `Access-Control-Allow-Origin`. `api/photos.htaccess.example`
+is the fix (same one-line `mod_headers` config Choir Connect already uses
+for its own files folder) -- upload it as `.htaccess` inside
+`PHOTO_UPLOAD_DIR`'s public folder. Without it, a book still generates
+correctly, just with that Visit's Photos silently omitted rather than the
+whole export failing.
+
+**Deliberately out of scope for v1:** selecting which Visits to include
+within a given Person/Temple/date-range book (it's always everything that
+scope matches), a cover page beyond the plain title page, a table of
+contents or page numbers, and a Year-in-Review-style Statistics summary
+folded into the book (12.15 stays a separate future item). Higher-
+resolution photos for "premium printing" remain a later enhancement per
+9.1 -- v1 books use the same standard image already used everywhere else
+in the app.
 
 ---
 

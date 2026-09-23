@@ -21,10 +21,14 @@
 
 <script src="js/api.js"></script>
 <script src="js/app.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/4.2.1/jspdf.umd.min.js"></script>
+<script src="js/book.js"></script>
 <script>
 let _visits = [];
 let _temples = [];
 let _people = [];
+let _allPhotos = [];
+let _periodVisits = [];
 let _vocab = { purposes: [], workTypes: [] };
 let _period = 'year';
 let _customFrom = '';
@@ -166,6 +170,10 @@ function geoStatsHtml(visits) {
 function renderStats() {
   const [from, to] = periodRange();
   const visits = _visits.filter(v => inRange(v.VisitDate, from, to));
+  _periodVisits = visits;
+
+  const exportBtn = document.getElementById('export-book-btn');
+  if (exportBtn) exportBtn.disabled = !visits.length;
 
   const templeIds = new Set(visits.map(v => v.TempleId));
   const workVisits = visits.filter(v => (v.Purposes || []).includes('Temple Work'));
@@ -229,12 +237,13 @@ async function loadStats() {
   await initPage('stats.html');
 
   try {
-    const [visitsRes, templesRes, peopleRes, vocab] = await Promise.all([
-      fetchData('visits'), fetchData('temples'), fetchData('people'), getVocab(),
+    const [visitsRes, templesRes, peopleRes, photosRes, vocab] = await Promise.all([
+      fetchData('visits'), fetchData('temples'), fetchData('people'), fetchData('photos'), getVocab(),
     ]);
     _visits = visitsRes.visits || [];
     _temples = templesRes.temples || [];
     _people = peopleRes.people || [];
+    _allPhotos = photosRes.photos || [];
     _vocab = vocab;
 
     if (!_visits.length) {
@@ -249,6 +258,7 @@ async function loadStats() {
 
       <div class="filter-bar">
         <div class="view-tabs" id="period-tabs" style="margin:0"></div>
+        <button type="button" class="btn secondary" id="export-book-btn">Export Memory Book</button>
       </div>
       <div class="filter-bar" id="custom-range-row" style="display:none">
         <label class="checkbox">From <input type="date" id="custom-from" style="width:auto"></label>
@@ -325,6 +335,13 @@ async function loadStats() {
         document.getElementById('trend-body').innerHTML = visitsOverTimeHtml(_visits, _trendGranularity);
       });
     });
+
+    wireMemoryBookButton(document.getElementById('export-book-btn'), () => ({
+      visits: _periodVisits,
+      allPhotos: _allPhotos,
+      title: 'Temple Visit Memories',
+      subtitle: `${periodLabel()} · ${_periodVisits.length} Visit${_periodVisits.length === 1 ? '' : 's'}`,
+    }));
 
     renderStats();
   } catch (err) {

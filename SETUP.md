@@ -109,6 +109,26 @@ WHERE u.username = 'you@example.com' AND a.app_key = 'temple-time';
 3. Front end (`share.html` + the "Share My List" link on `temples.html`)
    is live as soon as you push to GitHub and Pages redeploys.
 
+## 8. Phase 7: enable Memory Book PDF export (photos)
+
+The Memory Book export (`js/book.js`) works for text-only booklets with no
+extra setup. To include Photos in an exported book, the browser has to
+fetch each image and read it back out of a canvas, which the browser only
+allows if the photo server sends a CORS header -- without it, those
+Photos are silently skipped and the book still generates, just without
+pictures.
+
+1. Upload `api/photos.htaccess.example` to your `temple-time-photos`
+   folder (the same one `PHOTO_UPLOAD_DIR`/`PHOTO_BASE_URL` point at),
+   renaming it to `.htaccess` once it's there (FTP clients sometimes hide
+   or refuse to create dotfiles directly -- upload under a different name
+   and rename after, or enable "show hidden files" in your FTP client).
+2. No database or `api.php` changes -- this is purely a web-server config
+   change on the existing photos folder.
+3. Test it: open a Temple/Person/Statistics page that has Photos in its
+   Visits and click Export Memory Book -- the resulting PDF should have
+   pictures, not just text.
+
 ## Re-deploying after a change
 
 - Front end (`index.html`, `style.css`, `js/*.js`): push to GitHub, Pages

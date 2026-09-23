@@ -10,7 +10,11 @@ shared `users`/`sessions` login via **My Apps Hub** SSO. Multi-user: anyone
 granted access can log in, but every row is scoped by `user_id`, so each
 person's Temples/Visits/People/Plans/Photos stay private to them.
 
-## Status: Phases 1-4 live; Phase 6 built, pending deployment (Phase 5 skipped for now)
+The one external dependency in the whole app: **jsPDF**, loaded from
+cdnjs, for Phase 7's client-side Memory Book PDF export. Everything else
+is plain HTML/CSS/JS with no build step and no libraries.
+
+## Status: Phases 1-4 live; Phases 6-7 built, pending deployment (Phase 5 skipped for now)
 
 - [x] Phase 0 -- project foundation, schema, API auth skeleton
 - [x] Phase 1 -- Temples, People, Visits CRUD + full front end (Dashboard,
@@ -80,6 +84,20 @@ person's Temples/Visits/People/Plans/Photos stay private to them.
       recipient's People table is separate. Visits are never touched.
       Entry point: "Share My List" button on `temples.html`. See
       `SETUP.md` section 7 to enable.
+- [x] Phase 7 (built, not deployed for Photos) -- Memory Book PDF export
+      (`js/book.js`, jsPDF loaded from CDN, entirely client-side -- no new
+      schema or API endpoints). One shared builder
+      (`generateMemoryBook()`) feeds three entry points, each reusing a
+      Visit list the page already had loaded: **Export Memory Book** on
+      Person Detail (Visits shared with that Person), on Temple Detail
+      (Visits to that Temple), and on Statistics (Visits in whatever
+      Reporting Period is selected there, including Custom Range). Title
+      page + one section per Visit (Temple/Date/Who With/Group/Purpose/
+      Work Performed, then Notes/Spiritual Impressions/Memorable
+      Experiences/People Encountered/Tags, then that Visit's Photos in a
+      2-column grid), sorted chronologically. Photos need a CORS header on
+      the photo host to embed (see `SETUP.md` section 8) -- without it,
+      the book still generates, just without pictures for that Visit.
 
 See `SETUP.md` for deployment steps.
 
@@ -204,3 +222,26 @@ to matter:
   one without).
 - No admin/history view of past share codes or who redeemed what -- a
   code is deleted the moment it's used or expires, nothing is retained.
+
+## Known Phase 7 simplifications
+
+- Photos need a one-time CORS `.htaccess` on the photo host (`SETUP.md`
+  section 8) to embed in the PDF -- without it, a photo is silently left
+  out of the book rather than failing the export, so it's easy to not
+  notice it isn't configured. Text-only books work with zero setup.
+- Photo layout is a fixed 2-column grid at up to 150pt tall per row, using
+  each Visit's **standard** (1600px) image, not the original upload --
+  matches the spec's own framing that higher-resolution "premium
+  printing" photos are a future enhancement, not v1 (section 9.1).
+- No cover art, table of contents, or page numbers -- just a title page
+  and one section per Visit, chronological.
+- No "select which Visits" step for any of the three entry points -- each
+  one always includes everything the underlying filter (that Person, that
+  Temple, or the Statistics page's selected Reporting Period) matches.
+- Generation happens entirely in the browser tab and can take a few
+  seconds for a book with many Photos (each one is fetched and redrawn to
+  a canvas); the button shows "Generating..." and disables itself
+  meanwhile, but there's no progress bar for how far along it is.
+- No Year-in-Review-style summary page mixing Statistics into the book --
+  it's a Visit-by-Visit history, not a stats report (spec 12.15 marks
+  Year in Review as a separate future enhancement anyway).

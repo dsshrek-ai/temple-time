@@ -23,8 +23,12 @@
 <script src="js/api.js"></script>
 <script src="js/app.js"></script>
 <script src="js/photo.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/4.2.1/jspdf.umd.min.js"></script>
+<script src="js/book.js"></script>
 <script>
 let _temple = null;
+let _templeVisits = [];
+let _allPhotos = [];
 
 function statusBadge(t) {
   const bits = [t.Status];
@@ -132,7 +136,9 @@ async function loadTemple() {
     if (!t) { content.innerHTML = '<p class="note">Temple not found.</p>'; return; }
     _temple = t;
     const visits = visitsRes.visits || [];
+    _templeVisits = visits;
     const photos = (photosRes.photos || []).filter(p => p.TempleId === id);
+    _allPhotos = photos;
     const today = todayStr();
     const upcomingPlans = (plansRes.plans || [])
       .filter(p => p.TempleId === id && p.Status === 'Planned' && p.PlannedDate >= today);
@@ -160,6 +166,7 @@ async function loadTemple() {
           <a class="btn" href="plan-edit.html?templeId=${t.Id}">Plan a Visit</a>
           <a class="btn" href="visit-edit.html?templeId=${t.Id}">Quick Log</a>
           <a class="btn secondary" href="${mapsUrl(t)}" target="_blank" rel="noopener">Navigate</a>
+          <button type="button" class="btn secondary" id="export-book-btn" ${visits.length ? '' : 'disabled'}>Export Memory Book</button>
           <span id="add-photo-here"></span>
           <button type="button" class="btn secondary" onclick="toggleFavorite()">${t.Favorite ? 'Unfavorite' : 'Favorite'}</button>
           <button type="button" class="btn secondary" onclick="toggleVisitList()">${t.OnVisitList ? 'Remove from Visit List' : 'Add to My Visit List'}</button>
@@ -248,6 +255,13 @@ async function loadTemple() {
       templeId: t.Id,
       onUploaded: async () => { await loadTemple(); },
     });
+
+    wireMemoryBookButton(document.getElementById('export-book-btn'), () => ({
+      visits: _templeVisits,
+      allPhotos: _allPhotos,
+      title: t.Name,
+      subtitle: `${_templeVisits.length} Visit${_templeVisits.length === 1 ? '' : 's'}`,
+    }));
   } catch (err) {
     handleError(content, err);
   }

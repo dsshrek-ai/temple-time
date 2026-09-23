@@ -22,8 +22,12 @@
 
 <script src="js/api.js"></script>
 <script src="js/app.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/4.2.1/jspdf.umd.min.js"></script>
+<script src="js/book.js"></script>
 <script>
 let _person = null;
+let _togetherVisits = [];
+let _allPhotos = [];
 
 function openEditForm() {
   const p = _person;
@@ -74,15 +78,17 @@ async function loadPerson() {
   if (!id) { content.innerHTML = '<p class="note">No person specified.</p>'; return; }
 
   try {
-    const [peopleRes, visitsRes, vocab] = await Promise.all([
-      fetchData('people'), fetchData('visits'), getVocab().catch(() => ({ relationships: [] })),
+    const [peopleRes, visitsRes, photosRes, vocab] = await Promise.all([
+      fetchData('people'), fetchData('visits'), fetchData('photos'), getVocab().catch(() => ({ relationships: [] })),
     ]);
     const p = (peopleRes.people || []).find(x => x.Id === id);
     if (!p) { content.innerHTML = '<p class="note">Person not found.</p>'; return; }
     _person = p;
+    _allPhotos = photosRes.photos || [];
     const name = p.DisplayName || [p.FirstName, p.LastName].filter(Boolean).join(' ');
     const together = (visitsRes.visits || []).filter(v => (v.WhoWith || []).some(w => w.Id === id));
     together.sort((a, b) => b.VisitDate.localeCompare(a.VisitDate));
+    _togetherVisits = together;
     const temples = new Set(together.map(v => v.TempleId));
     const firstVisit = together.length ? together[together.length - 1].VisitDate : null;
     const lastVisit = together.length ? together[0].VisitDate : null;
@@ -97,6 +103,7 @@ async function loadPerson() {
         </div>
         <div class="detail-actions">
           <button type="button" class="btn secondary" onclick="openEditForm()">Edit Person</button>
+          <button type="button" class="btn secondary" id="export-book-btn" ${together.length ? '' : 'disabled'}>Export Memory Book</button>
           <button type="button" class="btn secondary" onclick="deletePerson()">Delete Person</button>
         </div>
         ${p.Notes ? `<p style="white-space:pre-wrap">${escapeHtml(p.Notes)}</p>` : ''}
@@ -142,6 +149,12 @@ async function loadPerson() {
 
     content.innerHTML = html;
     document.getElementById('edit-form').addEventListener('submit', submitEditPerson);
+    wireMemoryBookButton(document.getElementById('export-book-btn'), () => ({
+      visits: _togetherVisits,
+      allPhotos: _allPhotos,
+      title: `Memories with ${name}`,
+      subtitle: `${_togetherVisits.length} Visit${_togetherVisits.length === 1 ? '' : 's'} together`,
+    }));
   } catch (err) {
     handleError(content, err);
   }
