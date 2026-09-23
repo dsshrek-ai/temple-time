@@ -31,6 +31,11 @@ person's Temples/Visits/People/Plans/Photos stay private to them.
       Calendar" link)
 - [ ] Phase 4 -- Statistics & streaks
 - [ ] Phase 5 -- Search, filters, Nearby Temples, polish
+- [ ] Phase 6 -- Share Temple List (and Planned Visits, once Phase 3 exists)
+      with another Temple Time user via an in-app share code -- design in
+      `TempleTime.md` section 18.1. Needs a `deletePhoto` reference-count
+      fix (see that section) before Photos can be safely linked, not
+      duplicated, between two users' Temples.
 
 See `SETUP.md` for deployment steps.
 

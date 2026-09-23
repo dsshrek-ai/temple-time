@@ -1593,8 +1593,60 @@ Future Temple Time capabilities may include:
 - Higher-resolution selected book Photos
 - More advanced Nearby Temple planning
 - Recurring temple Plans
+- Share Temple List with another user (see 18.1)
 
 These features should build on the core data already established in the first version.
+
+---
+
+## 18.1 Share Temple List with Another User
+
+Decided 2026-09-23. Lets one Temple Time user share their Temple list (and,
+once Plans exist, their Planned Visits) with another Temple Time user.
+Depends on Phase 3 (Plans) for the Planned Visits half of this feature; the
+Temple-list half only depends on Phase 1.
+
+**Mechanism: in-app share code, not a file.** Both users are already
+accounts on the same shared MyDataWorld database, so this is a server-side
+operation, not an export/import of a document:
+
+1. **Share My Temple List** generates a short code (or a link carrying that
+   code) tied to the sharing user's account, expiring after some window
+   (e.g. 24-48 hours) or after first use.
+2. The recipient opens **Import from a Share Code**, enters it, and the
+   server reads the sharer's Temples (and Planned Visits) directly and
+   merges them into the recipient's own data. Nothing is serialized to
+   JSON/CSV or sent through a text message.
+3. **Dedup is by exact Temple Name match** (case-sensitive as typed). A
+   Temple whose name matches one the recipient already has is skipped, not
+   updated. Temples with a different name (including near-duplicates like
+   "Salt Lake Temple" vs. "Salt Lake City Temple") import as a new row.
+   This is deliberately simple: false negatives (two rows for what's really
+   the same temple) are resolved by the recipient manually deleting one,
+   rather than the app guessing at fuzzy matches.
+4. **Visits and Plans belonging to the recipient are never touched or
+   created by this import** -- personal visit history stays personal. Only
+   the Temple list (and, later, Planned Visits) transfers. Planned Visits
+   that reference People are not expected to resolve automatically (the
+   recipient's People table is separate) -- the Who With field is dropped
+   or copied as unlinked names on import, to be decided when Plans exist.
+5. **Photos are not duplicated -- they're linked.** A shared Temple's
+   Primary Photo (if any) can be carried over by inserting a new `tt_photos`
+   row for the recipient that points at the *same* `image_path`/
+   `thumb_path` as the original -- no re-upload, no duplicate storage,
+   since both users' files already live in one shared upload folder on the
+   same server. This requires one correctness fix before it's safe:
+   `deletePhoto` currently deletes the physical files unconditionally when
+   a row is deleted, which would break the other user's copy. Before
+   shipping this feature, `deletePhoto` needs a reference-count check
+   (query whether any other `tt_photos` row, across any user, still points
+   at that filename) and must only unlink the files once no row references
+   them.
+
+**Open for later:** what exactly is shareable (just Favorite/On My Visit
+List temples? all of them? a hand-picked subset?), whether the recipient
+can preview before accepting, and how a share code is revoked/expired
+early.
 
 ---
 
