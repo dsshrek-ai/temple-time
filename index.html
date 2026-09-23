@@ -23,6 +23,8 @@
 <script src="js/app.js"></script>
 <script src="js/photo.js"></script>
 <script>
+let _nextPlan = null;
+
 async function loadDashboard() {
   const content = document.getElementById('content');
   await initPage('index.html');
@@ -66,6 +68,7 @@ async function loadDashboard() {
 
     if (upcomingPlans.length) {
       const next = upcomingPlans[0];
+      _nextPlan = next;
       const when = next.PlannedTime ? `${formatDate(next.PlannedDate)} · ${formatTime(next.PlannedTime)}` : formatDate(next.PlannedDate);
       const bits = [purposeSummary(next.Purposes), whoWithSummary(next.WhoWith)].filter(Boolean);
       html += `
@@ -77,7 +80,7 @@ async function loadDashboard() {
           <p class="meta">${next.AppointmentScheduled ? '✓ Appointment Scheduled' : '<strong style="color:#a33">⚠ Appointment Not Yet Scheduled</strong>'}</p>
           <div class="detail-actions">
             <a class="btn secondary" href="${mapsUrl(planTempleForMaps(next))}" target="_blank" rel="noopener">Navigate</a>
-            <a class="btn secondary" href="${calendarEventUrl(next)}">Calendar</a>
+            <button type="button" class="btn secondary" onclick="downloadCalendarEvent(_nextPlan)">Calendar</button>
             <a class="btn" href="visit-edit.html?fromPlan=${next.Id}">Log Visit</a>
           </div>
         </div>

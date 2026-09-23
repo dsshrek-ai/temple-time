@@ -175,21 +175,32 @@ function planTempleForMaps(p) {
   };
 }
 
-// ---- Add to Calendar (.ics data URL, no OAuth) ----
+// ---- Add to Calendar (.ics file, downloaded via Blob, no OAuth) ----
 //
-// Originally this built a Google Calendar "quick add" web URL
-// (calendar.google.com/calendar/render?action=TEMPLATE&...). That works in
-// a desktop browser, but on a phone with the Google Calendar app installed,
-// iOS/Android intercepts the link via Universal Links and hands it to the
-// native app -- which does not understand the web-only "action=TEMPLATE"
-// query scheme, so it just opens to today's view with nothing filled in.
-// A standard .ics (RFC 5545) file sidesteps that entirely: it's a generic
-// file format every calendar app (Google, Apple, Outlook) already knows
-// how to import, so there's no app-specific link-handling to fight. Still
-// requires one manual tap to confirm the add -- no URL scheme can silently
-// write to someone's calendar without that; true no-tap auto-creation
-// needs the full Calendar API with OAuth (deliberately deferred, see
-// TempleTime.md 11.3).
+// History of this feature, because it's gone through two failed approaches:
+//
+// 1. Google Calendar "quick add" web URL
+//    (calendar.google.com/calendar/render?action=TEMPLATE&...). Works in a
+//    desktop browser, but on a phone with the Google Calendar app
+//    installed, iOS/Android intercepts the link via Universal Links and
+//    hands it to the native app -- which does not understand the web-only
+//    "action=TEMPLATE" query scheme, so it opened to today's view with
+//    nothing filled in.
+// 2. A generic .ics file as a `data:text/calendar,...` URL on a plain
+//    <a href>. Sidesteps the Google-app-interception problem, but recent
+//    iOS Safari blocks top-level navigation to `data:` URIs outright for
+//    security -- tapping the link just silently cancels (reported as "it
+//    blinks and does nothing").
+//
+// Current approach: build the same .ics text, but hand it to the browser
+// as a Blob object URL via a programmatic, `download`-attributed <a> click
+// (downloadCalendarEvent()) instead of a static href. This is the standard
+// "trigger a file save" pattern and isn't subject to the data:-URI
+// navigation block. The cost is one extra tap versus the ideal: it saves
+// the .ics file (to Downloads / the Files app on iOS) rather than jumping
+// straight to an "Add Event" screen, so the user opens that saved file
+// once to import it. True zero-tap auto-creation needs the full Calendar
+// API with OAuth (deliberately deferred, see TempleTime.md 11.3).
 //
 // Dates are floating local time (no TZID/Z), matching how Planned Time was
 // entered -- Temple Time doesn't track a timezone for any Temple.
@@ -201,7 +212,7 @@ function icsEscape(s) {
   return String(s).replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\n/g, '\\n');
 }
 
-function calendarEventUrl(plan) {
+function buildIcsText(plan) {
   const pad = n => String(n).padStart(2, '0');
   const [y, m, d] = plan.PlannedDate.split('-').map(Number);
   let dtStart, dtEnd, allDay = false;
@@ -250,7 +261,19 @@ function calendarEventUrl(plan) {
     'END:VEVENT',
     'END:VCALENDAR',
   ];
-  return 'data:text/calendar;charset=utf-8,' + encodeURIComponent(lines.join('\r\n'));
+  return lines.join('\r\n');
+}
+
+function downloadCalendarEvent(plan) {
+  const blob = new Blob([buildIcsText(plan)], { type: 'text/calendar;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `temple-visit-${plan.Id}.ics`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
 }
 
 function statRowHtml(stats) {
