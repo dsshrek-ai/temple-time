@@ -464,7 +464,7 @@ function saveVisit(int $userId, array $v, ?int $id): int {
          VALUES (?,?,?,?,?,?,?,?,?,?,?)'
       );
       $stmt->bind_param(
-        'iisssssssi', $userId, $templeId, $date, $arrival, $departure, $group, $notes,
+        'iissssssssi', $userId, $templeId, $date, $arrival, $departure, $group, $notes,
         $spiritual, $memorable, $encountered, $favorite
       );
       $stmt->execute();
