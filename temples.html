@@ -107,7 +107,7 @@ async function submitAddTemple(ev) {
     const res = await postAction('addTemple', payload);
     window.location.href = `temple.html?id=${res.id}`;
   } catch (err) {
-    msg.innerHTML = '<p class="field-error">Could not save. Please try again.</p>';
+    msg.innerHTML = `<p class="field-error">${escapeHtml(err.message && err.message !== 'not-authorized' ? err.message : 'Could not save. Please try again.')}</p>`;
   }
 }
 

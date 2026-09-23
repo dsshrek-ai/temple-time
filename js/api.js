@@ -37,7 +37,14 @@ async function postAction(action, payload) {
     body: JSON.stringify({ action, ...(payload || {}) }),
   });
   if (res.status === 401 || res.status === 403) throw new Error('not-authorized');
-  if (!res.ok) throw new Error(`Request failed: ${res.status}`);
+  if (!res.ok) {
+    // Surface the server's actual error text (api.php always returns
+    // {ok:false, error:"..."} on failure) instead of a bare status code, so
+    // forms can show the real reason a save failed rather than a guess.
+    let serverMessage = '';
+    try { serverMessage = (await res.clone().json()).error || ''; } catch (e) { /* body wasn't JSON */ }
+    throw new Error(serverMessage || `Request failed: ${res.status}`);
+  }
   return res.json();
 }
 

@@ -56,7 +56,7 @@ async function submitEditPerson(ev) {
     document.getElementById('edit-form-wrap').style.display = 'none';
     loadPerson();
   } catch (err) {
-    msg.innerHTML = '<p class="field-error">Could not save. Please try again.</p>';
+    msg.innerHTML = `<p class="field-error">${escapeHtml(err.message && err.message !== 'not-authorized' ? err.message : 'Could not save. Please try again.')}</p>`;
   }
 }
 
