@@ -279,6 +279,9 @@ function peopleForUser(int $userId): array {
       'Active' => (bool)$r['active'],
       'VisitsTogether' => (int)$r['visits_together'],
       'TemplesTogether' => (int)$r['temples_together'],
+      // empty(): tolerates a database the Person Photo migration hasn't run on yet.
+      'PhotoUrl' => !empty($r['photo_path']) ? photoUrl($r['photo_path']) : null,
+      'PhotoThumbUrl' => !empty($r['photo_thumb_path']) ? photoUrl($r['photo_thumb_path']) : null,
     ];
   }
   $stmt->close();
@@ -317,10 +320,75 @@ function savePerson(int $userId, array $p, ?int $id): int {
 }
 
 function deletePerson(int $userId, int $id): void {
+  removePersonPhotoFiles($userId, $id);
   $stmt = db()->prepare('DELETE FROM tt_people WHERE id = ? AND user_id = ?');
   $stmt->bind_param('ii', $id, $userId);
   $stmt->execute();
   $stmt->close();
+}
+
+// ---- Person Photo ----
+// A single profile picture per Person, stored as columns on tt_people rather
+// than a tt_photos row -- gallery Photos must belong to a Temple or Visit,
+// and a portrait isn't a temple memory. Files live in the same
+// PHOTO_UPLOAD_DIR as gallery Photos, with a "person_" prefix.
+
+function setPersonPhoto(int $userId, int $personId, array $files): void {
+  if (!photosConfigured()) { fail('Photo uploads are not configured on the server yet.', 500); }
+
+  $chk = db()->prepare('SELECT 1 FROM tt_people WHERE id = ? AND user_id = ?');
+  $chk->bind_param('ii', $personId, $userId);
+  $chk->execute();
+  if (!$chk->get_result()->fetch_row()) { fail('Person not found'); }
+  $chk->close();
+
+  $standard = validateUploadedImage($files['standard'] ?? null);
+  $thumb = validateUploadedImage($files['thumb'] ?? null);
+  $standardBytes = resizeToJpeg($standard['tmp_name'], 800, 85);
+  $thumbBytes = resizeToJpeg($thumb['tmp_name'], 500, 80);
+  if ($standardBytes === null || $thumbBytes === null) {
+    fail('Could not process that image on the server (unsupported format or GD unavailable).', 500);
+  }
+
+  $token = 'person_' . bin2hex(random_bytes(16));
+  $imagePath = $token . '.jpg';
+  $thumbPath = $token . '_thumb.jpg';
+  $dir = rtrim(PHOTO_UPLOAD_DIR, '/');
+  if (@file_put_contents($dir . '/' . $imagePath, $standardBytes) === false) {
+    fail('Could not save the photo.', 500);
+  }
+  if (@file_put_contents($dir . '/' . $thumbPath, $thumbBytes) === false) {
+    @unlink($dir . '/' . $imagePath);
+    fail('Could not save the photo thumbnail.', 500);
+  }
+
+  // Replacing a photo: drop the old files only after the new ones are safely written.
+  removePersonPhotoFiles($userId, $personId);
+  $stmt = db()->prepare('UPDATE tt_people SET photo_path = ?, photo_thumb_path = ? WHERE id = ? AND user_id = ?');
+  $stmt->bind_param('ssii', $imagePath, $thumbPath, $personId, $userId);
+  $stmt->execute();
+  $stmt->close();
+}
+
+function removePersonPhoto(int $userId, int $personId): void {
+  removePersonPhotoFiles($userId, $personId);
+  $stmt = db()->prepare('UPDATE tt_people SET photo_path = NULL, photo_thumb_path = NULL WHERE id = ? AND user_id = ?');
+  $stmt->bind_param('ii', $personId, $userId);
+  $stmt->execute();
+  $stmt->close();
+}
+
+function removePersonPhotoFiles(int $userId, int $personId): void {
+  if (!photosConfigured()) { return; }
+  $stmt = db()->prepare('SELECT photo_path, photo_thumb_path FROM tt_people WHERE id = ? AND user_id = ?');
+  $stmt->bind_param('ii', $personId, $userId);
+  $stmt->execute();
+  $row = $stmt->get_result()->fetch_assoc();
+  $stmt->close();
+  if (!$row) { return; }
+  $dir = rtrim(PHOTO_UPLOAD_DIR, '/');
+  if (!empty($row['photo_path'])) { @unlink($dir . '/' . $row['photo_path']); }
+  if (!empty($row['photo_thumb_path'])) { @unlink($dir . '/' . $row['photo_thumb_path']); }
 }
 
 // ---- Visits ----
@@ -1395,6 +1463,22 @@ switch ($action) {
     $id = (int)($body['id'] ?? 0);
     if ($id <= 0) { fail('Missing person id'); }
     deletePerson((int)$user['id'], $id);
+    respond(['ok' => true]);
+  }
+
+  case 'setPersonPhoto': {
+    $user = requireMember();
+    $id = (int)($_POST['id'] ?? 0);
+    if ($id <= 0) { fail('Missing person id'); }
+    setPersonPhoto((int)$user['id'], $id, $_FILES);
+    respond(['ok' => true]);
+  }
+
+  case 'removePersonPhoto': {
+    $user = requireMember();
+    $id = (int)($body['id'] ?? 0);
+    if ($id <= 0) { fail('Missing person id'); }
+    removePersonPhoto((int)$user['id'], $id);
     respond(['ok' => true]);
   }
 

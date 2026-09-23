@@ -11,6 +11,20 @@ const NAV_ITEMS = [
   { href: 'stats.html', label: 'Statistics', built: true },
 ];
 
+// Adds the "Instructions" button next to Log Out on every page. Injected
+// here rather than hard-coded into each page's header so there's one place
+// to change it.
+function renderHelpButton(activeHref) {
+  const right = document.querySelector('header.site-header .header-right');
+  if (!right || right.querySelector('.help-btn')) return;
+  const a = document.createElement('a');
+  a.className = 'btn secondary help-btn';
+  a.href = 'help.html';
+  a.textContent = 'Instructions';
+  if (activeHref === 'help.html') a.setAttribute('aria-current', 'page');
+  right.insertBefore(a, right.firstChild);
+}
+
 function renderNav(activeHref) {
   const nav = document.getElementById('site-nav');
   if (!nav) return;
@@ -135,8 +149,8 @@ function visitCardHtml(v) {
 function personCardHtml(p) {
   const name = p.DisplayName || [p.FirstName, p.LastName].filter(Boolean).join(' ');
   return `
-    <a class="click-card" href="person.html?id=${p.Id}">
-      <div class="thumb"></div>
+    <a class="click-card person-card" href="person.html?id=${p.Id}">
+      ${thumbTagHtml(p.PhotoThumbUrl, name)}
       <div class="body">
         <p class="title">${escapeHtml(name)}${!p.Active ? ' (Inactive)' : ''}</p>
         <p class="meta">${escapeHtml(p.Relationship || '')}</p>
@@ -351,6 +365,7 @@ function mapsUrl(t) {
 // Returns true if the caller should proceed to load its own data.
 async function initPage(activeHref) {
   renderNav(activeHref);
+  renderHelpButton(activeHref);
   await captureSso();
   const logoutBtn = document.getElementById('logout-btn');
   if (logoutBtn) {

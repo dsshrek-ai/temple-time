@@ -298,6 +298,14 @@ CREATE TABLE IF NOT EXISTS tt_share_codes (
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- ---------- PERSON PHOTO ----------
+-- Run once. One optional profile picture per Person (filenames in
+-- PHOTO_UPLOAD_DIR, same as tt_photos). Run BEFORE re-uploading api.php.
+
+ALTER TABLE tt_people
+  ADD COLUMN photo_path VARCHAR(100) NULL,
+  ADD COLUMN photo_thumb_path VARCHAR(100) NULL;
+
 -- ============================================================
 -- BOOTSTRAP (run once, after you've signed up through My Apps Hub):
 --

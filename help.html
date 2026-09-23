@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Instructions — Temple Time</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="bar">
+    <h1>Temple Time</h1>
+    <nav id="site-nav"></nav>
+    <div class="header-right"><button class="btn secondary" id="logout-btn">Log Out</button></div>
+  </div>
+</header>
+
+<main>
+  <!-- Keep these short and plain. When a feature is added or a button is
+       renamed, update the matching section here in the same change. -->
+  <h2>Instructions</h2>
+
+  <div class="card help-section">
+    <h3>Getting Started</h3>
+    <ul>
+      <li>Go to <strong>Temples</strong> and tap <strong>+ Add Temple</strong> for each temple you visit or hope to visit.</li>
+      <li>Go to <strong>People</strong> and add the family and friends you attend with.</li>
+      <li>Then start logging visits — the <strong>Dashboard</strong> fills in as you go.</li>
+    </ul>
+  </div>
+
+  <div class="card help-section">
+    <h3>Logging a Visit</h3>
+    <ul>
+      <li>Tap <strong>Quick Log</strong>, pick the temple and date, and save. That's all that's required.</li>
+      <li>Open <strong>Add More Details</strong> to record who you went with, purpose, work performed, and journal notes.</li>
+      <li>On a past visit, <strong>Duplicate as New Visit</strong> copies it so a repeat trip takes seconds.</li>
+    </ul>
+  </div>
+
+  <div class="card help-section">
+    <h3>Planning a Visit</h3>
+    <ul>
+      <li>Tap <strong>Plan a Visit</strong> to put a future trip on your list.</li>
+      <li>Check <strong>Appointment Scheduled</strong> once you've booked it with the temple — unbooked plans show a red warning.</li>
+      <li>Use <strong>Navigate</strong> for directions and <strong>Add to Google Calendar</strong> to put it on your calendar.</li>
+      <li>After you go, tap <strong>Log This Visit</strong> on the plan to turn it into a visit.</li>
+    </ul>
+  </div>
+
+  <div class="card help-section">
+    <h3>Photos</h3>
+    <ul>
+      <li>Tap <strong>+ Add Photo</strong> on a temple or visit. Photos from your phone are resized automatically.</li>
+      <li>Open a photo to add a caption, tag people, or set it as the <strong>Temple Primary Photo</strong> or <strong>Visit Cover Photo</strong>.</li>
+    </ul>
+  </div>
+
+  <div class="card help-section">
+    <h3>People</h3>
+    <ul>
+      <li>Open a person and tap <strong>Add Photo</strong> to give them a picture. Tap <strong>Change Photo</strong> to replace it.</li>
+      <li>Each person's page shows how many visits and temples you've shared.</li>
+      <li>To hide someone without losing their history, tap <strong>Edit Person</strong> and uncheck <strong>Active</strong>.</li>
+    </ul>
+  </div>
+
+  <div class="card help-section">
+    <h3>Memory Book &amp; Statistics</h3>
+    <ul>
+      <li><strong>Export Memory Book</strong> on a temple or person creates a PDF of your visits and photos.</li>
+      <li><strong>Statistics</strong> shows streaks, most-visited temples, and who you attend with most.</li>
+    </ul>
+  </div>
+
+  <div class="card help-section">
+    <h3>Sharing Your Temple List</h3>
+    <ul>
+      <li>On <strong>Temples</strong>, tap <strong>Share My List</strong>, then <strong>Generate Share Code</strong>. You can choose to include your upcoming plans.</li>
+      <li>Give the code to another Temple Time user. They enter it under <strong>Import from a Share Code</strong>.</li>
+      <li>Codes work once and expire after 48 hours. Your visits and journal stay private.</li>
+    </ul>
+  </div>
+</main>
+
+<script src="js/api.js"></script>
+<script src="js/app.js"></script>
+<script>
+initPage('help.html');
+</script>
+</body>
+</html>

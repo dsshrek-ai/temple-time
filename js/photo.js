@@ -52,6 +52,21 @@ async function uploadPhotoFile(file, opts) {
   return postForm('addPhoto', fd);
 }
 
+// A Person's single profile picture (not a gallery Photo). Smaller
+// standard size than gallery Photos since it's only ever shown as a
+// portrait; the server enforces the same caps.
+async function uploadPersonPhotoFile(personId, file) {
+  const [standardBlob, thumbBlob] = await Promise.all([
+    resizeImageFile(file, 800, 0.85),
+    resizeImageFile(file, 500, 0.8),
+  ]);
+  const fd = new FormData();
+  fd.set('id', String(personId));
+  fd.set('standard', standardBlob, 'standard.jpg');
+  fd.set('thumb', thumbBlob, 'thumb.jpg');
+  return postForm('setPersonPhoto', fd);
+}
+
 // Renders a "+ Add Photo(s)" control into `container`. Attaches itself to
 // either a Temple or a Visit (or both, when called from a Visit -- the
 // server attaches the Visit's Temple automatically). Calls

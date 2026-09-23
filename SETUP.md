@@ -129,6 +129,17 @@ pictures.
    Visits and click Export Memory Book -- the resulting PDF should have
    pictures, not just text.
 
+## 9. Person Photo
+
+1. Run the "PERSON PHOTO" section of `api/schema.sql` in phpMyAdmin (adds
+   `tt_people.photo_path`/`photo_thumb_path`). Run it before re-uploading
+   `api.php`.
+2. Re-upload `api/api.php` by FTP. No new `config.php` values -- person
+   photos go in the existing `PHOTO_UPLOAD_DIR` (filenames start with
+   `person_`).
+3. Front end (`person.html`, `js/photo.js`, `js/app.js`) is live once
+   pushed to GitHub.
+
 ## Re-deploying after a change
 
 - Front end (`index.html`, `style.css`, `js/*.js`): push to GitHub, Pages

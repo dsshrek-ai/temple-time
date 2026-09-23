@@ -22,6 +22,7 @@
 
 <script src="js/api.js"></script>
 <script src="js/app.js"></script>
+<script src="js/photo.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/4.2.1/jspdf.umd.min.js"></script>
 <script src="js/book.js"></script>
 <script>
@@ -64,6 +65,28 @@ async function submitEditPerson(ev) {
   }
 }
 
+async function onPersonPhotoPicked(ev) {
+  const input = ev.target;
+  const file = input.files && input.files[0];
+  if (!file) return;
+  const status = document.getElementById('person-photo-status');
+  status.textContent = 'Uploading...';
+  try {
+    await uploadPersonPhotoFile(_person.Id, file);
+    loadPerson();
+  } catch (err) {
+    status.textContent = '';
+    alert(`Could not upload the photo: ${err.message}`);
+  }
+  input.value = '';
+}
+
+async function removePersonPhoto() {
+  if (!confirm('Remove this photo?')) return;
+  await postAction('removePersonPhoto', { id: _person.Id });
+  loadPerson();
+}
+
 async function deletePerson() {
   const name = _person.DisplayName || _person.FirstName;
   if (!confirm(`Delete ${name}? This removes them from any past Visits. This cannot be undone.`)) return;
@@ -95,13 +118,22 @@ async function loadPerson() {
 
     let html = `
       <div class="card">
-        <div class="detail-header">
+        <div class="person-header">
+          ${p.PhotoUrl
+            ? `<a href="${escapeHtml(p.PhotoUrl)}" target="_blank" rel="noopener"><img class="person-photo" src="${escapeHtml(p.PhotoUrl)}" alt="${escapeHtml(name)}"></a>`
+            : `<div class="person-photo"></div>`}
           <div>
             <h2 style="margin-bottom:0.2rem">${escapeHtml(name)}${!p.Active ? ' <span class="meta">(Inactive)</span>' : ''}</h2>
             <p class="meta">${escapeHtml(p.Relationship || '')}</p>
           </div>
         </div>
         <div class="detail-actions">
+          <label class="btn secondary photo-upload-label">
+            ${p.PhotoUrl ? 'Change Photo' : 'Add Photo'}
+            <input type="file" accept="image/*" class="photo-upload-input" id="person-photo-input">
+          </label>
+          ${p.PhotoUrl ? `<button type="button" class="btn secondary" onclick="removePersonPhoto()">Remove Photo</button>` : ''}
+          <span class="meta" id="person-photo-status"></span>
           <button type="button" class="btn secondary" onclick="openEditForm()">Edit Person</button>
           <button type="button" class="btn secondary" id="export-book-btn" ${together.length ? '' : 'disabled'}>Export Memory Book</button>
           <button type="button" class="btn secondary" onclick="deletePerson()">Delete Person</button>
@@ -149,6 +181,7 @@ async function loadPerson() {
 
     content.innerHTML = html;
     document.getElementById('edit-form').addEventListener('submit', submitEditPerson);
+    document.getElementById('person-photo-input').addEventListener('change', onPersonPhotoPicked);
     wireMemoryBookButton(document.getElementById('export-book-btn'), () => ({
       visits: _togetherVisits,
       allPhotos: _allPhotos,
