@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Plan — Temple Time</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="bar">
+    <h1>Temple Time</h1>
+    <nav id="site-nav"></nav>
+    <div class="header-right"><button class="btn secondary" id="logout-btn">Log Out</button></div>
+  </div>
+</header>
+
+<main>
+  <p><a href="plans.html">&larr; All Plans</a></p>
+  <div id="content"><p class="note">Loading...</p></div>
+</main>
+
+<script src="js/api.js"></script>
+<script src="js/app.js"></script>
+<script>
+let _plan = null;
+
+async function cancelPlan() {
+  if (!confirm('Cancel this Plan? It stays in your history as Cancelled.')) return;
+  await postAction('cancelPlan', { id: _plan.Id });
+  loadPlan();
+}
+
+async function deletePlan() {
+  if (!confirm('Delete this Plan entirely? This cannot be undone.')) return;
+  await postAction('deletePlan', { id: _plan.Id });
+  window.location.href = 'plans.html';
+}
+
+async function loadPlan() {
+  const content = document.getElementById('content');
+  await initPage('plans.html');
+  const id = Number(new URLSearchParams(window.location.search).get('id'));
+  if (!id) { content.innerHTML = '<p class="note">No plan specified.</p>'; return; }
+
+  try {
+    const res = await fetchData('plans');
+    const p = (res.plans || []).find(x => x.Id === id);
+    if (!p) { content.innerHTML = '<p class="note">Plan not found.</p>'; return; }
+    _plan = p;
+
+    const loc = [p.TempleCity, p.TempleState].filter(Boolean).join(', ');
+    const addr = [p.TempleStreetAddress, p.TempleAddressLine2, loc, p.TemplePostalCode, p.TempleCountry].filter(Boolean).join(', ');
+    const who = (p.WhoWith || []).map(x => escapeHtml(x.Name)).join(', ');
+    const isPlanned = p.Status === 'Planned';
+
+    function field(label, value) {
+      if (!value) return '';
+      return `<p><strong>${escapeHtml(label)}:</strong> ${value}</p>`;
+    }
+
+    let html = `
+      <div class="card">
+        <div class="detail-header">
+          <div>
+            <h2 style="margin-bottom:0.2rem">${escapeHtml(p.TempleName)}</h2>
+            <p class="meta">${escapeHtml(addr)}</p>
+            ${p.Status !== 'Planned' ? `<p class="meta">${escapeHtml(p.Status)}</p>` : ''}
+          </div>
+        </div>
+        <div class="detail-actions">
+          <a class="btn secondary" href="${mapsUrl(planTempleForMaps(p))}" target="_blank" rel="noopener">Navigate</a>
+          <a class="btn secondary" href="${googleCalendarUrl(p)}" target="_blank" rel="noopener">Add to Google Calendar</a>
+          ${isPlanned ? `<a class="btn" href="visit-edit.html?fromPlan=${p.Id}">Log This Visit</a>` : ''}
+          ${isPlanned ? `<button type="button" class="btn secondary" onclick="openEditForm()">Edit Plan</button>` : ''}
+          ${isPlanned ? `<button type="button" class="btn secondary" onclick="cancelPlan()">Cancel Plan</button>` : ''}
+          <button type="button" class="btn secondary" onclick="deletePlan()">Delete Plan</button>
+        </div>
+
+        ${field('Planned Date', escapeHtml(formatDate(p.PlannedDate)))}
+        ${field('Planned Time', p.PlannedTime ? escapeHtml(formatTime(p.PlannedTime)) : '')}
+        ${field('End Time', p.EndTime ? escapeHtml(formatTime(p.EndTime)) : '')}
+        ${field('Who With', who)}
+        ${field('Group', p.GroupName ? escapeHtml(p.GroupName) : '')}
+        ${field('Planned Purpose', (p.Purposes || []).length ? escapeHtml(p.Purposes.join(', ')) : '')}
+        ${field('Planned Work', (p.WorkPerformed || []).length ? escapeHtml(p.WorkPerformed.join(', ')) : '')}
+        ${p.Notes ? `<p><strong>Notes:</strong></p><p style="white-space:pre-wrap">${escapeHtml(p.Notes)}</p>` : ''}
+      </div>
+
+      <div id="edit-form-wrap" style="display:none"></div>
+    `;
+
+    content.innerHTML = html;
+  } catch (err) {
+    handleError(content, err);
+  }
+}
+
+async function openEditForm() {
+  const p = _plan;
+  const wrap = document.getElementById('edit-form-wrap');
+  const [temples, people, vocab] = await Promise.all([
+    fetchData('temples'), fetchData('people'), getVocab(),
+  ]);
+  const activePeople = (people.people || []).filter(x => x.Active);
+  const whoIds = (p.WhoWith || []).map(x => String(x.Id));
+
+  wrap.innerHTML = `
+    <div class="card">
+      <h3>Edit Plan</h3>
+      <form id="edit-form">
+        <label for="e-temple">Temple</label>
+        <select id="e-temple">${(temples.temples || []).map(t => `<option value="${t.Id}" ${t.Id === p.TempleId ? 'selected' : ''}>${escapeHtml(t.Name)}</option>`).join('')}</select>
+        <div class="form-row">
+          <div><label for="e-date">Planned Date</label><input type="date" id="e-date" value="${p.PlannedDate}" required></div>
+          <div><label for="e-time">Planned Time</label><input type="time" id="e-time" value="${p.PlannedTime || ''}"></div>
+        </div>
+        <label for="e-endtime">End Time</label>
+        <input type="time" id="e-endtime" value="${p.EndTime || ''}">
+        <label>Who With</label>
+        <div class="check-group">${activePeople.map((person, i) => `
+          <label><input type="checkbox" name="e-who" value="${person.Id}" ${whoIds.includes(String(person.Id)) ? 'checked' : ''}> ${escapeHtml(person.DisplayName || person.FirstName)}</label>
+        `).join('')}</div>
+        <label for="e-group">Group</label>
+        <input type="text" id="e-group" value="${escapeHtml(p.GroupName || '')}">
+        <label>Planned Purpose</label>
+        <div class="check-group">${(vocab.purposes || []).map(x => `
+          <label><input type="checkbox" name="e-purpose" value="${escapeHtml(x)}" ${(p.Purposes || []).includes(x) ? 'checked' : ''}> ${escapeHtml(x)}</label>
+        `).join('')}</div>
+        <label>Planned Work</label>
+        <div class="check-group">${(vocab.workTypes || []).map(x => `
+          <label><input type="checkbox" name="e-work" value="${escapeHtml(x)}" ${(p.WorkPerformed || []).includes(x) ? 'checked' : ''}> ${escapeHtml(x)}</label>
+        `).join('')}</div>
+        <label for="e-notes">Notes</label>
+        <textarea id="e-notes" rows="3">${escapeHtml(p.Notes || '')}</textarea>
+        <div id="edit-msg"></div>
+        <div class="form-actions">
+          <button type="submit" class="btn">Save Changes</button>
+          <button type="button" class="btn secondary" onclick="document.getElementById('edit-form-wrap').innerHTML=''">Cancel</button>
+        </div>
+      </form>
+    </div>
+  `;
+  wrap.style.display = 'block';
+  wrap.scrollIntoView({ behavior: 'smooth' });
+
+  document.getElementById('edit-form').addEventListener('submit', async ev => {
+    ev.preventDefault();
+    const msg = document.getElementById('edit-msg');
+    const payload = {
+      id: p.Id,
+      templeId: Number(document.getElementById('e-temple').value),
+      plannedDate: document.getElementById('e-date').value,
+      plannedTime: document.getElementById('e-time').value,
+      endTime: document.getElementById('e-endtime').value,
+      groupName: document.getElementById('e-group').value.trim(),
+      notes: document.getElementById('e-notes').value.trim(),
+      personIds: Array.from(document.querySelectorAll('input[name="e-who"]:checked')).map(cb => Number(cb.value)),
+      purposes: Array.from(document.querySelectorAll('input[name="e-purpose"]:checked')).map(cb => cb.value),
+      workPerformed: Array.from(document.querySelectorAll('input[name="e-work"]:checked')).map(cb => cb.value),
+    };
+    try {
+      await postAction('updatePlan', payload);
+      loadPlan();
+    } catch (err) {
+      msg.innerHTML = `<p class="field-error">${escapeHtml(err.message || 'Could not save.')}</p>`;
+    }
+  });
+}
+loadPlan();
+</script>
+</body>
+</html>

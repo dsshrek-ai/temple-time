@@ -27,12 +27,16 @@ async function loadDashboard() {
   const content = document.getElementById('content');
   await initPage('index.html');
   try {
-    const [templesRes, visitsRes, photosRes] = await Promise.all([
-      fetchData('temples'), fetchData('visits'), fetchData('photos'),
+    const [templesRes, visitsRes, photosRes, plansRes] = await Promise.all([
+      fetchData('temples'), fetchData('visits'), fetchData('photos'), fetchData('plans'),
     ]);
     const temples = templesRes.temples || [];
     const visits = visitsRes.visits || [];
     const photos = photosRes.photos || [];
+    const today = todayStr();
+    const upcomingPlans = (plansRes.plans || [])
+      .filter(p => p.Status === 'Planned' && p.PlannedDate >= today)
+      .sort((a, b) => (a.PlannedDate + (a.PlannedTime || '')).localeCompare(b.PlannedDate + (b.PlannedTime || '')));
 
     if (temples.length === 0) {
       content.innerHTML = emptyStateHtml(
@@ -52,13 +56,33 @@ async function loadDashboard() {
     let html = `
       <div class="quick-actions">
         <a class="btn" href="visit-edit.html">Quick Log</a>
-        <span class="btn disabled" title="Coming in Phase 3">Plan a Visit</span>
+        <a class="btn secondary" href="plan-edit.html">Plan a Visit</a>
         <a class="btn secondary" href="temples.html?add=1">Add Temple</a>
         <a class="btn secondary" href="temples.html?view=visitlist">View My Visit List</a>
         <span class="btn disabled" title="Coming in Phase 5">Nearby Temples</span>
         <a class="btn secondary" href="photos.html">Photo Gallery</a>
       </div>
     `;
+
+    if (upcomingPlans.length) {
+      const next = upcomingPlans[0];
+      const when = next.PlannedTime ? `${formatDate(next.PlannedDate)} · ${formatTime(next.PlannedTime)}` : formatDate(next.PlannedDate);
+      const bits = [purposeSummary(next.Purposes), whoWithSummary(next.WhoWith)].filter(Boolean);
+      html += `
+        <h2>Coming Up</h2>
+        <div class="card">
+          <h3 style="margin-bottom:0.2rem">${escapeHtml(next.TempleName)}</h3>
+          <p class="meta">${escapeHtml(when)}</p>
+          ${bits.length ? `<p class="meta">${escapeHtml(bits.join(' · '))}</p>` : ''}
+          <div class="detail-actions">
+            <a class="btn secondary" href="${mapsUrl(planTempleForMaps(next))}" target="_blank" rel="noopener">Navigate</a>
+            <a class="btn secondary" href="${googleCalendarUrl(next)}" target="_blank" rel="noopener">Calendar</a>
+            <a class="btn" href="visit-edit.html?fromPlan=${next.Id}">Log Visit</a>
+          </div>
+        </div>
+        ${upcomingPlans.length > 1 ? `<p><a href="plans.html">View All Plans &rarr;</a></p>` : ''}
+      `;
+    }
 
     html += statRowHtml([
       { num: visits.length, label: 'Total Visits' },

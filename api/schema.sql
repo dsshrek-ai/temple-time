@@ -208,6 +208,71 @@ ALTER TABLE tt_temples ADD COLUMN primary_photo_id INT NULL,
 ALTER TABLE tt_visits ADD COLUMN cover_photo_id INT NULL,
   ADD CONSTRAINT fk_tt_visits_cover_photo FOREIGN KEY (cover_photo_id) REFERENCES tt_photos(id) ON DELETE SET NULL;
 
+-- ---------- PHASE 3: PLANS ----------
+-- Run once, after Phase 1 (and, if you want the "Log This Visit" -> linked
+-- Visit relationship to work, after Phase 2 too -- order between Phase 2
+-- and Phase 3 doesn't matter to each other, just run both before the
+-- matching api.php).
+--
+-- status: Planned | Completed | Cancelled. "Log This Visit" moves a Plan to
+-- Completed and links the new Visit back via tt_visits.plan_id; "Cancel
+-- Plan" moves it to Cancelled without creating a Visit. Neither path
+-- deletes the Plan row -- Completed/Cancelled Plans stay in history (spec
+-- section 11.1).
+--
+-- No calendar_event_id column: "Add to Google Calendar" is a quick-add
+-- link (no OAuth), so there's no event identifier to retain. If a future
+-- phase adds full Calendar API integration, add that column then.
+
+CREATE TABLE IF NOT EXISTS tt_plans (
+  id            INT AUTO_INCREMENT PRIMARY KEY,
+  user_id       INT NOT NULL,
+  temple_id     INT NOT NULL,
+  planned_date  DATE NOT NULL,
+  planned_time  TIME NULL,
+  end_time      TIME NULL,
+  group_name    VARCHAR(200) NULL,
+  notes         TEXT NULL,
+  status        VARCHAR(20) NOT NULL DEFAULT 'Planned',
+  created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  KEY ix_tt_plans_user (user_id, status, planned_date),
+  KEY ix_tt_plans_temple (temple_id),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (temple_id) REFERENCES tt_temples(id) ON DELETE CASCADE
+) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Same Purpose/Work vocabularies as Visits (PURPOSES / WORK_TYPES in api.php).
+CREATE TABLE IF NOT EXISTS tt_plan_purposes (
+  plan_id  INT NOT NULL,
+  purpose  VARCHAR(40) NOT NULL,
+  PRIMARY KEY (plan_id, purpose),
+  FOREIGN KEY (plan_id) REFERENCES tt_plans(id) ON DELETE CASCADE
+) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS tt_plan_work (
+  plan_id    INT NOT NULL,
+  work_type  VARCHAR(20) NOT NULL,
+  PRIMARY KEY (plan_id, work_type),
+  FOREIGN KEY (plan_id) REFERENCES tt_plans(id) ON DELETE CASCADE
+) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- "Who With" -- People planned to be present, from tt_people.
+CREATE TABLE IF NOT EXISTS tt_plan_people (
+  plan_id    INT NOT NULL,
+  person_id  INT NOT NULL,
+  PRIMARY KEY (plan_id, person_id),
+  FOREIGN KEY (plan_id) REFERENCES tt_plans(id) ON DELETE CASCADE,
+  FOREIGN KEY (person_id) REFERENCES tt_people(id) ON DELETE CASCADE
+) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Set by "Log This Visit" -- links the resulting Visit back to the Plan it
+-- came from. ON DELETE SET NULL so deleting the Plan later (there's no UI
+-- for that today, but nothing stops a direct SQL delete) doesn't cascade
+-- into deleting the Visit it produced.
+ALTER TABLE tt_visits ADD COLUMN plan_id INT NULL,
+  ADD CONSTRAINT fk_tt_visits_plan FOREIGN KEY (plan_id) REFERENCES tt_plans(id) ON DELETE SET NULL;
+
 -- ============================================================
 -- BOOTSTRAP (run once, after you've signed up through My Apps Hub):
 --

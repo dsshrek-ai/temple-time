@@ -124,15 +124,18 @@ async function loadTemple() {
   if (!id) { content.innerHTML = '<p class="note">No temple specified.</p>'; return; }
 
   try {
-    const [templesRes, visitsRes, photosRes, vocab] = await Promise.all([
+    const [templesRes, visitsRes, photosRes, plansRes, vocab] = await Promise.all([
       fetchData('temples'), fetchData('visits', { templeId: id }), fetchData('photos'),
-      getVocab().catch(() => ({ statuses: [] })),
+      fetchData('plans'), getVocab().catch(() => ({ statuses: [] })),
     ]);
     const t = (templesRes.temples || []).find(x => x.Id === id);
     if (!t) { content.innerHTML = '<p class="note">Temple not found.</p>'; return; }
     _temple = t;
     const visits = visitsRes.visits || [];
     const photos = (photosRes.photos || []).filter(p => p.TempleId === id);
+    const today = todayStr();
+    const upcomingPlans = (plansRes.plans || [])
+      .filter(p => p.TempleId === id && p.Status === 'Planned' && p.PlannedDate >= today);
     const peopleTogether = new Set();
     visits.forEach(v => (v.WhoWith || []).forEach(p => peopleTogether.add(p.Id)));
     const groundsVisits = visits.filter(v => (v.Purposes || []).includes('Temple Grounds')).length;
@@ -154,6 +157,7 @@ async function loadTemple() {
           </div>
         </div>
         <div class="detail-actions">
+          <a class="btn" href="plan-edit.html?templeId=${t.Id}">Plan a Visit</a>
           <a class="btn" href="visit-edit.html?templeId=${t.Id}">Quick Log</a>
           <a class="btn secondary" href="${mapsUrl(t)}" target="_blank" rel="noopener">Navigate</a>
           <span id="add-photo-here"></span>
@@ -214,6 +218,11 @@ async function loadTemple() {
           </div>
         </form>
       </div>
+
+      ${upcomingPlans.length ? `
+        <h2>Upcoming Plans</h2>
+        <div class="card-grid">${upcomingPlans.map(planCardHtml).join('')}</div>
+      ` : ''}
 
       <h2>Temple Gallery</h2>
       <div id="gallery-grid"></div>

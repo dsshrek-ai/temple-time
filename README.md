@@ -10,25 +10,39 @@ shared `users`/`sessions` login via **My Apps Hub** SSO. Multi-user: anyone
 granted access can log in, but every row is scoped by `user_id`, so each
 person's Temples/Visits/People/Plans/Photos stay private to them.
 
-## Status: Phase 1 live; Phase 2 built, pending deployment
+## Status: Phases 1-2 live; Phase 3 built, pending deployment
 
 - [x] Phase 0 -- project foundation, schema, API auth skeleton
 - [x] Phase 1 -- Temples, People, Visits CRUD + full front end (Dashboard,
       Quick Log, detail pages). **Deployed and confirmed working.**
-- [x] Phase 2 (built, not deployed) -- Photos: multi-file upload with
-      client-side canvas resize (1600x1600 standard / ~450px thumbnail,
-      always re-encoded as JPEG -- handles HEIC/HEIF from iPhones without
-      any server-side HEIC decoding) plus a server-side GD re-resize that
-      enforces the same caps regardless of what the client sends. Gallery
-      (`photos.html`) with Favorites/Temple/Person/Tag/Year filters, detail
-      page (`photo.html`) with caption/date/People/Tags editing and
-      Favorite/Set-as-Primary/Set-as-Cover/Delete actions. Upload wired into
-      Temple and Visit detail pages; Temple/Visit cards and the Dashboard's
-      "Recent Memories" now show real thumbnails. See `SETUP.md` section 5
-      to enable -- **the schema migration must run before the new api.php is
-      uploaded**, or Temples/Visits break too (see that section for why).
-- [ ] Phase 3 -- Plans, Google Maps navigation, Google Calendar ("Add to
-      Calendar" link)
+- [x] Phase 2 -- Photos: multi-file upload with client-side canvas resize
+      (1600x1600 standard / ~450px thumbnail, always re-encoded as JPEG --
+      handles HEIC/HEIF from iPhones without any server-side HEIC decoding)
+      plus a server-side GD re-resize that enforces the same caps regardless
+      of what the client sends. Gallery (`photos.html`) with
+      Favorites/Temple/Person/Tag/Year filters, detail page (`photo.html`)
+      with caption/date/People/Tags editing and
+      Favorite/Set-as-Primary/Set-as-Cover/Delete actions. **Deployed and
+      confirmed working.**
+- [x] Phase 3 (built, not deployed) -- Plans: `tt_plans` +
+      purpose/work/people join tables, plus a nullable `plan_id` on
+      `tt_visits`. `plans.html` (Upcoming/This Week/This Month/All/
+      Completed/Cancelled views), `plan.html` (detail + inline edit),
+      `plan-edit.html` (create). Navigate (Google Maps) and **Add to
+      Google Calendar** (quick-add link, no OAuth -- see the Phase 3
+      decision in `TempleTime.md` 11.3) on every Plan. **Log This Visit**
+      reuses `visit-edit.html` (`?fromPlan=<id>`), carrying forward Temple/
+      Planned Date/Who With/Group/Purpose/**Planned Work** (unlike Duplicate
+      as New Visit, Work *is* carried here since it's a plan for what you
+      intend to do, not a copy of what already happened); saving links the
+      new Visit's `plan_id` and flips the Plan to Completed. Cancel Plan
+      (status only) and Delete Plan (hard delete) both included. Dashboard
+      gained a "Coming Up" section (nearest upcoming Plan + quick actions);
+      Temple Detail gained "Plan a Visit" + an "Upcoming Plans" list; Visit
+      Detail links back to its originating Plan when there is one. See
+      `SETUP.md` section 6 to enable -- same schema-before-api.php ordering
+      caveat as Phase 2 (`plansForUser`/`temple.html`/`index.html` etc. all
+      query the new tables/columns).
 - [ ] Phase 4 -- Statistics & streaks
 - [ ] Phase 5 -- Search, filters, Nearby Temples, polish
 - [ ] Phase 6 -- Share Temple List (and Planned Visits, once Phase 3 exists)
@@ -49,9 +63,13 @@ See `SETUP.md` for deployment steps.
 - `tt_photos` -- one row per uploaded photo (Phase 2), plus
   `tt_photo_people` / `tt_photo_tags` join tables, and a nullable
   `primary_photo_id` on `tt_temples` / `cover_photo_id` on `tt_visits`
+- `tt_plans` -- one row per planned future visit (Phase 3), plus join tables
+  for multi-select Planned Purpose (`tt_plan_purposes`), Planned Work
+  (`tt_plan_work`), Who With (`tt_plan_people`), and a nullable `plan_id`
+  on `tt_visits` (set by "Log This Visit")
 
-Plans (Phase 3) will extend this schema additively -- see the comments at
-the top of `api/schema.sql`.
+See the comments at the top of `api/schema.sql` for the full history of
+additive changes.
 
 ## Known Phase 1 simplifications
 
@@ -77,3 +95,17 @@ to matter:
   the whole page after each file finishes, so the "Uploading N/M" progress
   text can visibly reset partway through a multi-file batch. All the files
   still upload correctly -- this is a cosmetic rough edge, not data loss.
+
+## Known Phase 3 simplifications
+
+- No recurring Plans (explicitly deferred in the spec itself, section 17).
+- Editing a Plan is only available while its status is Planned -- a
+  Completed or Cancelled Plan can be viewed or deleted, not edited back.
+- "Log This Visit" carries Planned Work forward (unlike Duplicate as New
+  Visit); if that turns out to be the wrong call for how ordinance work
+  actually gets planned vs. performed, it's a one-line change in
+  `visit-edit.html`'s `fromPlan` branch.
+- Google Calendar is a quick-add link only -- editing or cancelling a Plan
+  after adding it to your calendar does not update or remove that calendar
+  event. Full Calendar API integration (OAuth) was deliberately deferred;
+  see the decision recorded in `TempleTime.md` 11.3.

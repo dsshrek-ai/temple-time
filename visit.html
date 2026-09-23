@@ -71,6 +71,7 @@ async function loadVisit() {
           <span id="add-photo-here"></span>
           ${_temple ? `<a class="btn secondary" href="${mapsUrl(_temple)}" target="_blank" rel="noopener">Navigate to Temple</a>` : ''}
           <a class="btn secondary" href="temple.html?id=${v.TempleId}">View Temple</a>
+          ${v.PlanId ? `<a class="btn secondary" href="plan.html?id=${v.PlanId}">View Original Plan</a>` : ''}
           <button type="button" class="btn secondary" onclick="deleteVisit()">Delete Visit</button>
         </div>
 

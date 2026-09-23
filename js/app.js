@@ -6,7 +6,7 @@ const NAV_ITEMS = [
   { href: 'temples.html', label: 'Temples', built: true },
   { href: 'visits.html', label: 'Visits', built: true },
   { href: 'people.html', label: 'People', built: true },
-  { href: 'plans.html', label: 'Plans', built: false },
+  { href: 'plans.html', label: 'Plans', built: true },
   { href: 'photos.html', label: 'Photos', built: true },
   { href: 'stats.html', label: 'Statistics', built: false },
 ];
@@ -55,6 +55,11 @@ function purposeSummary(purposes) {
 }
 
 // ---- Formatting ----
+
+function todayStr() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
 
 function formatDate(dateStr) {
   if (!dateStr) return '';
@@ -132,6 +137,85 @@ function personCardHtml(p) {
         <p class="meta">${p.VisitsTogether} visit${p.VisitsTogether === 1 ? '' : 's'} together · ${p.TemplesTogether} temple${p.TemplesTogether === 1 ? '' : 's'}</p>
       </div>
     </a>`;
+}
+
+function planCardHtml(p) {
+  const loc = [p.TempleCity, p.TempleState].filter(Boolean).join(', ');
+  const bits = [];
+  const who = whoWithSummary(p.WhoWith);
+  if (who) bits.push(who);
+  const purpose = purposeSummary(p.Purposes);
+  if (purpose) bits.push(purpose);
+  const work = workShorthand(p.WorkPerformed);
+  const when = p.PlannedTime ? `${formatDate(p.PlannedDate)} · ${formatTime(p.PlannedTime)}` : formatDate(p.PlannedDate);
+  return `
+    <a class="click-card" href="plan.html?id=${p.Id}">
+      ${thumbTagHtml(p.TemplePrimaryPhotoThumbUrl, p.TempleName)}
+      <div class="body">
+        <p class="title">${escapeHtml(p.TempleName)}</p>
+        <p class="meta">${escapeHtml(when)}${loc ? ' · ' + escapeHtml(loc) : ''}</p>
+        <p class="meta">${escapeHtml(bits.join(' · '))}${work ? ` <span class="work-shorthand">${escapeHtml(work)}</span>` : ''}</p>
+        ${p.Status !== 'Planned' ? `<p class="meta badges">${escapeHtml(p.Status)}</p>` : ''}
+      </div>
+    </a>`;
+}
+
+// Adapts a Plan's Temple* fields (TempleName/TempleLatitude/...) to the
+// {Name, Latitude, StreetAddress, ...} shape mapsUrl() expects (which
+// matches a Temple record's own field names).
+function planTempleForMaps(p) {
+  return {
+    Name: p.TempleName, Latitude: p.TempleLatitude, Longitude: p.TempleLongitude,
+    StreetAddress: p.TempleStreetAddress, City: p.TempleCity, StateRegion: p.TempleState,
+    PostalCode: p.TemplePostalCode, Country: p.TempleCountry,
+  };
+}
+
+// ---- Google Calendar (quick-add link, no OAuth -- see TempleTime.md 11.3
+// and the Phase 3 decision to start simple) ----
+//
+// Dates are built as "floating" local time (no trailing Z), which Google
+// Calendar's quick-add endpoint interprets in the viewer's own calendar
+// timezone. That's the right behavior here since Temple Time doesn't track
+// a timezone for any Temple -- Planned Time was entered as a plain local
+// time in the first place.
+function googleCalendarUrl(plan) {
+  const pad = n => String(n).padStart(2, '0');
+  const [y, m, d] = plan.PlannedDate.split('-').map(Number);
+  let startStr, endStr;
+  if (plan.PlannedTime) {
+    const [sh, sm] = plan.PlannedTime.split(':').map(Number);
+    startStr = `${y}${pad(m)}${pad(d)}T${pad(sh)}${pad(sm)}00`;
+    let eh = sh + 2, em = sm; // default duration when no End Time was given
+    if (plan.EndTime) { [eh, em] = plan.EndTime.split(':').map(Number); }
+    endStr = `${y}${pad(m)}${pad(d)}T${pad(eh)}${pad(em)}00`;
+  } else {
+    // All-day event -- Google's end date is exclusive, so use the next day.
+    const start = new Date(y, m - 1, d);
+    const end = new Date(y, m - 1, d + 1);
+    const fmt = dt => `${dt.getFullYear()}${pad(dt.getMonth() + 1)}${pad(dt.getDate())}`;
+    startStr = fmt(start);
+    endStr = fmt(end);
+  }
+
+  const details = [];
+  details.push(`Temple: ${plan.TempleName}`);
+  if ((plan.Purposes || []).length) details.push(`Purpose: ${plan.Purposes.join(', ')}`);
+  if ((plan.WorkPerformed || []).length) details.push(`Planned Work: ${plan.WorkPerformed.join(', ')}`);
+  if ((plan.WhoWith || []).length) details.push(`With: ${plan.WhoWith.map(x => x.Name).join(', ')}`);
+  if (plan.Notes) details.push(plan.Notes);
+
+  const addr = [plan.TempleStreetAddress, plan.TempleCity, plan.TempleState, plan.TemplePostalCode, plan.TempleCountry]
+    .filter(Boolean).join(', ');
+
+  const params = new URLSearchParams({
+    action: 'TEMPLATE',
+    text: `Temple — ${plan.TempleName}`,
+    dates: `${startStr}/${endStr}`,
+    details: details.join('\n'),
+    location: addr,
+  });
+  return `https://calendar.google.com/calendar/render?${params.toString()}`;
 }
 
 function statRowHtml(stats) {

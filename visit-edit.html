@@ -23,11 +23,7 @@
 <script src="js/app.js"></script>
 <script>
 let _editingId = null;
-
-function todayStr() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
+let _planId = null;
 
 function checkGroupHtml(name, options, checkedValues, idPrefix) {
   return `<div class="check-group">${options.map((o, i) => `
@@ -52,6 +48,7 @@ async function submitForm(ev) {
   const payload = {
     templeId,
     visitDate,
+    planId: _planId,
     groupName: document.getElementById('ve-group').value.trim(),
     purposes: getCheckedValues('purpose'),
     workPerformed: getCheckedValues('work'),
@@ -95,6 +92,7 @@ async function loadForm() {
   const idParam = params.get('id');
   const templeIdParam = params.get('templeId');
   const duplicateOf = params.get('duplicateOf');
+  const fromPlan = params.get('fromPlan');
   _editingId = idParam ? Number(idParam) : null;
 
   try {
@@ -146,6 +144,22 @@ async function loadForm() {
         // Work Performed intentionally not carried forward -- ordinance work
         // typically differs visit to visit even at the same temple.
       }
+    } else if (fromPlan) {
+      const plansRes = await fetchData('plans');
+      const plan = (plansRes.plans || []).find(p => p.Id === Number(fromPlan));
+      if (!plan) { content.innerHTML = '<p class="note">Plan not found.</p>'; return; }
+      if (plan.Status !== 'Planned') {
+        content.innerHTML = '<p class="note">This Plan was already logged or cancelled.</p>';
+        return;
+      }
+      title = 'Log This Visit';
+      _planId = plan.Id;
+      preselectTempleId = plan.TempleId;
+      preselectDate = plan.PlannedDate;
+      preselectWho = (plan.WhoWith || []).map(p => String(p.Id));
+      preselectGroup = plan.GroupName || '';
+      preselectPurposes = plan.Purposes || [];
+      preselectWork = plan.WorkPerformed || [];
     }
 
     content.innerHTML = `
@@ -196,7 +210,7 @@ async function loadForm() {
         <div id="form-msg"></div>
         <div class="form-actions">
           <button type="submit" class="btn">Save Visit</button>
-          <a class="btn secondary" href="${_editingId ? `visit.html?id=${_editingId}` : 'visits.html'}">Cancel</a>
+          <a class="btn secondary" href="${_editingId ? `visit.html?id=${_editingId}` : (_planId ? `plan.html?id=${_planId}` : 'visits.html')}">Cancel</a>
           ${_editingId ? `<button type="button" class="btn secondary" id="delete-btn">Delete Visit</button>` : ''}
         </div>
       </form>

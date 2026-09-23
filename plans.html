@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Plans — Temple Time</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="bar">
+    <h1>Temple Time</h1>
+    <nav id="site-nav"></nav>
+    <div class="header-right"><button class="btn secondary" id="logout-btn">Log Out</button></div>
+  </div>
+</header>
+
+<main>
+  <div id="content"><p class="note">Loading...</p></div>
+</main>
+
+<script src="js/api.js"></script>
+<script src="js/app.js"></script>
+<script>
+let _plans = [];
+let _view = 'upcoming';
+
+const VIEWS = [
+  { key: 'upcoming', label: 'Upcoming' },
+  { key: 'thisweek', label: 'This Week' },
+  { key: 'thismonth', label: 'This Month' },
+  { key: 'all', label: 'All Plans' },
+  { key: 'completed', label: 'Completed' },
+  { key: 'cancelled', label: 'Cancelled' },
+];
+
+function matchesView(p, view) {
+  const today = todayStr();
+  switch (view) {
+    case 'upcoming': return p.Status === 'Planned' && p.PlannedDate >= today;
+    case 'thisweek': {
+      if (p.Status !== 'Planned') return false;
+      const start = startOfWeek(new Date());
+      const end = new Date(start); end.setDate(end.getDate() + 6);
+      const [y, m, d] = p.PlannedDate.split('-').map(Number);
+      const pd = new Date(y, m - 1, d);
+      return pd >= start && pd <= end;
+    }
+    case 'thismonth': {
+      if (p.Status !== 'Planned') return false;
+      const now = new Date();
+      const [y, m] = p.PlannedDate.split('-').map(Number);
+      return y === now.getFullYear() && m === now.getMonth() + 1;
+    }
+    case 'completed': return p.Status === 'Completed';
+    case 'cancelled': return p.Status === 'Cancelled';
+    default: return true;
+  }
+}
+
+function renderList() {
+  const list = _plans.filter(p => matchesView(p, _view));
+  const grid = document.getElementById('p-grid');
+  grid.innerHTML = list.length
+    ? `<div class="card-grid">${list.map(planCardHtml).join('')}</div>`
+    : emptyStateHtml('No records match this view.', '', '');
+}
+
+function renderTabs() {
+  document.getElementById('p-tabs').innerHTML = VIEWS.map(v =>
+    `<button type="button" class="${v.key === _view ? 'active' : ''}" data-view="${v.key}">${escapeHtml(v.label)}</button>`
+  ).join('');
+  document.querySelectorAll('#p-tabs button').forEach(btn => {
+    btn.addEventListener('click', () => { _view = btn.dataset.view; renderTabs(); renderList(); });
+  });
+}
+
+async function loadPlans() {
+  const content = document.getElementById('content');
+  await initPage('plans.html');
+
+  try {
+    const res = await fetchData('plans');
+    _plans = res.plans || [];
+
+    content.innerHTML = `
+      <h2>Plans</h2>
+      <div class="filter-bar">
+        <a class="btn" href="plan-edit.html">+ Plan a Visit</a>
+      </div>
+      <div class="view-tabs" id="p-tabs"></div>
+      <div id="p-grid"></div>
+    `;
+
+    if (!_plans.length) {
+      document.getElementById('p-grid').innerHTML = emptyStateHtml(
+        'No upcoming temple visits planned.', '',
+        `<p><a class="btn" href="plan-edit.html">Plan a Visit</a></p>`
+      );
+      document.getElementById('p-tabs').style.display = 'none';
+    } else {
+      renderTabs();
+      renderList();
+    }
+  } catch (err) {
+    handleError(content, err);
+  }
+}
+loadPlans();
+</script>
+</body>
+</html>

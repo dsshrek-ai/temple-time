@@ -385,6 +385,7 @@ function visitsForUser(int $userId, ?int $temple_id = null): array {
       'MemorableExperiences' => $r['memorable_experiences'],
       'PeopleEncountered' => $r['people_encountered'],
       'FavoriteVisit' => (bool)$r['favorite_visit'],
+      'PlanId' => $r['plan_id'] !== null ? (int)$r['plan_id'] : null,
       // Visit Cover Photo if set, else the Temple's Primary Photo (spec
       // 6.3/8.1: cards show "Visit Cover Photo or Temple Primary Photo").
       'CoverPhotoThumbUrl' => $r['cover_photo_thumb']
@@ -467,22 +468,41 @@ function saveVisit(int $userId, array $v, ?int $id): int {
   $encountered = nullIfBlank((string)($v['peopleEncountered'] ?? ''));
   $favorite = !empty($v['favoriteVisit']) ? 1 : 0;
 
+  // "Log This Visit" from a Plan: only meaningful when creating a brand new
+  // Visit (editing an existing one never re-links or re-completes a Plan).
+  $planId = null;
+  if ($id === null && !empty($v['planId'])) {
+    $planId = (int)$v['planId'];
+    $chk = db()->prepare("SELECT 1 FROM tt_plans WHERE id = ? AND user_id = ? AND status = 'Planned'");
+    $chk->bind_param('ii', $planId, $userId);
+    $chk->execute();
+    if (!$chk->get_result()->fetch_row()) { fail('Plan not found, or it was already logged/cancelled.'); }
+    $chk->close();
+  }
+
   $conn = db();
   $conn->begin_transaction();
   try {
     if ($id === null) {
       $stmt = $conn->prepare(
         'INSERT INTO tt_visits (user_id, temple_id, visit_date, arrival_time, departure_time,
-           group_name, notes, spiritual_impressions, memorable_experiences, people_encountered, favorite_visit)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?)'
+           group_name, notes, spiritual_impressions, memorable_experiences, people_encountered, favorite_visit, plan_id)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)'
       );
       $stmt->bind_param(
-        'iissssssssi', $userId, $templeId, $date, $arrival, $departure, $group, $notes,
-        $spiritual, $memorable, $encountered, $favorite
+        'iissssssssii', $userId, $templeId, $date, $arrival, $departure, $group, $notes,
+        $spiritual, $memorable, $encountered, $favorite, $planId
       );
       $stmt->execute();
       $id = $stmt->insert_id;
       $stmt->close();
+
+      if ($planId !== null) {
+        $upd = $conn->prepare("UPDATE tt_plans SET status = 'Completed' WHERE id = ? AND user_id = ?");
+        $upd->bind_param('ii', $planId, $userId);
+        $upd->execute();
+        $upd->close();
+      }
     } else {
       $stmt = $conn->prepare(
         'UPDATE tt_visits SET temple_id=?, visit_date=?, arrival_time=?, departure_time=?,
@@ -561,6 +581,194 @@ function saveVisit(int $userId, array $v, ?int $id): int {
 
 function deleteVisit(int $userId, int $id): void {
   $stmt = db()->prepare('DELETE FROM tt_visits WHERE id = ? AND user_id = ?');
+  $stmt->bind_param('ii', $id, $userId);
+  $stmt->execute();
+  $stmt->close();
+}
+
+// ---- Plans ----
+
+const PLAN_STATUSES = ['Planned', 'Completed', 'Cancelled'];
+
+function plansForUser(int $userId): array {
+  $stmt = db()->prepare(
+    "SELECT p.*, t.name AS temple_name, t.city AS temple_city, t.state_region AS temple_state,
+       t.street_address, t.address_line2, t.postal_code, t.country, t.latitude, t.longitude,
+       tp.thumb_path AS temple_primary_photo_thumb
+     FROM tt_plans p
+     JOIN tt_temples t ON t.id = p.temple_id
+     LEFT JOIN tt_photos tp ON tp.id = t.primary_photo_id
+     WHERE p.user_id = ?
+     ORDER BY p.planned_date, p.planned_time IS NULL, p.planned_time, p.id"
+  );
+  $stmt->bind_param('i', $userId);
+  $stmt->execute();
+  $res = $stmt->get_result();
+  $plans = [];
+  $ids = [];
+  while ($r = $res->fetch_assoc()) {
+    $id = (int)$r['id'];
+    $ids[] = $id;
+    $plans[$id] = [
+      'Id' => $id,
+      'TempleId' => (int)$r['temple_id'],
+      'TempleName' => $r['temple_name'],
+      'TempleCity' => $r['temple_city'],
+      'TempleState' => $r['temple_state'],
+      'TempleStreetAddress' => $r['street_address'],
+      'TempleAddressLine2' => $r['address_line2'],
+      'TemplePostalCode' => $r['postal_code'],
+      'TempleCountry' => $r['country'],
+      'TempleLatitude' => $r['latitude'] !== null ? (float)$r['latitude'] : null,
+      'TempleLongitude' => $r['longitude'] !== null ? (float)$r['longitude'] : null,
+      'TemplePrimaryPhotoThumbUrl' => $r['temple_primary_photo_thumb'] ? photoUrl($r['temple_primary_photo_thumb']) : null,
+      'PlannedDate' => $r['planned_date'],
+      'PlannedTime' => $r['planned_time'],
+      'EndTime' => $r['end_time'],
+      'GroupName' => $r['group_name'],
+      'Notes' => $r['notes'],
+      'Status' => $r['status'],
+      'Purposes' => [],
+      'WorkPerformed' => [],
+      'WhoWith' => [],
+    ];
+  }
+  $stmt->close();
+  if (!$ids) { return []; }
+
+  $placeholders = implode(',', array_fill(0, count($ids), '?'));
+  $types = str_repeat('i', count($ids));
+
+  $stmt = db()->prepare("SELECT plan_id, purpose FROM tt_plan_purposes WHERE plan_id IN ($placeholders)");
+  $stmt->bind_param($types, ...$ids);
+  $stmt->execute();
+  $res = $stmt->get_result();
+  while ($r = $res->fetch_assoc()) { $plans[(int)$r['plan_id']]['Purposes'][] = $r['purpose']; }
+  $stmt->close();
+
+  $stmt = db()->prepare("SELECT plan_id, work_type FROM tt_plan_work WHERE plan_id IN ($placeholders)");
+  $stmt->bind_param($types, ...$ids);
+  $stmt->execute();
+  $res = $stmt->get_result();
+  while ($r = $res->fetch_assoc()) { $plans[(int)$r['plan_id']]['WorkPerformed'][] = $r['work_type']; }
+  $stmt->close();
+
+  $stmt = db()->prepare(
+    "SELECT pp.plan_id, pe.id, pe.first_name, pe.last_name, pe.display_name
+     FROM tt_plan_people pp JOIN tt_people pe ON pe.id = pp.person_id
+     WHERE pp.plan_id IN ($placeholders)"
+  );
+  $stmt->bind_param($types, ...$ids);
+  $stmt->execute();
+  $res = $stmt->get_result();
+  while ($r = $res->fetch_assoc()) {
+    $plans[(int)$r['plan_id']]['WhoWith'][] = [
+      'Id' => (int)$r['id'],
+      'Name' => $r['display_name'] ?: trim($r['first_name'] . ' ' . $r['last_name']),
+    ];
+  }
+  $stmt->close();
+
+  return array_values($plans);
+}
+
+function savePlan(int $userId, array $p, ?int $id): int {
+  $templeId = (int)($p['templeId'] ?? 0);
+  $date = trim((string)($p['plannedDate'] ?? ''));
+  if ($templeId <= 0) { fail('Temple is required'); }
+  if ($date === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) { fail('A valid Planned Date is required'); }
+
+  $chk = db()->prepare('SELECT 1 FROM tt_temples WHERE id = ? AND user_id = ?');
+  $chk->bind_param('ii', $templeId, $userId);
+  $chk->execute();
+  if (!$chk->get_result()->fetch_row()) { fail('Temple not found'); }
+  $chk->close();
+
+  $time = nullIfBlank((string)($p['plannedTime'] ?? ''));
+  $endTime = nullIfBlank((string)($p['endTime'] ?? ''));
+  $group = nullIfBlank((string)($p['groupName'] ?? ''));
+  $notes = nullIfBlank((string)($p['notes'] ?? ''));
+
+  $conn = db();
+  $conn->begin_transaction();
+  try {
+    if ($id === null) {
+      $stmt = $conn->prepare(
+        'INSERT INTO tt_plans (user_id, temple_id, planned_date, planned_time, end_time, group_name, notes, status)
+         VALUES (?,?,?,?,?,?,?,\'Planned\')'
+      );
+      $stmt->bind_param('iisssss', $userId, $templeId, $date, $time, $endTime, $group, $notes);
+      $stmt->execute();
+      $id = $stmt->insert_id;
+      $stmt->close();
+    } else {
+      $stmt = $conn->prepare(
+        'UPDATE tt_plans SET temple_id=?, planned_date=?, planned_time=?, end_time=?, group_name=?, notes=?
+         WHERE id=? AND user_id=?'
+      );
+      $stmt->bind_param('isssssii', $templeId, $date, $time, $endTime, $group, $notes, $id, $userId);
+      $stmt->execute();
+      $stmt->close();
+    }
+
+    $del = $conn->prepare('DELETE FROM tt_plan_purposes WHERE plan_id = ?');
+    $del->bind_param('i', $id); $del->execute(); $del->close();
+    $purposes = normList((array)($p['purposes'] ?? []), PURPOSES);
+    if ($purposes) {
+      $stmt = $conn->prepare('INSERT INTO tt_plan_purposes (plan_id, purpose) VALUES (?, ?)');
+      foreach ($purposes as $x) { $stmt->bind_param('is', $id, $x); $stmt->execute(); }
+      $stmt->close();
+    }
+
+    $del = $conn->prepare('DELETE FROM tt_plan_work WHERE plan_id = ?');
+    $del->bind_param('i', $id); $del->execute(); $del->close();
+    $work = normList((array)($p['workPerformed'] ?? []), WORK_TYPES);
+    if ($work) {
+      $stmt = $conn->prepare('INSERT INTO tt_plan_work (plan_id, work_type) VALUES (?, ?)');
+      foreach ($work as $x) { $stmt->bind_param('is', $id, $x); $stmt->execute(); }
+      $stmt->close();
+    }
+
+    $del = $conn->prepare('DELETE FROM tt_plan_people WHERE plan_id = ?');
+    $del->bind_param('i', $id); $del->execute(); $del->close();
+    $personIds = array_values(array_unique(array_map('intval', (array)($p['personIds'] ?? []))));
+    if ($personIds) {
+      $placeholders = implode(',', array_fill(0, count($personIds), '?'));
+      $types = 'i' . str_repeat('i', count($personIds));
+      $chk = $conn->prepare("SELECT id FROM tt_people WHERE user_id = ? AND id IN ($placeholders)");
+      $params = array_merge([$userId], $personIds);
+      $chk->bind_param($types, ...$params);
+      $chk->execute();
+      $validIds = [];
+      $res = $chk->get_result();
+      while ($r = $res->fetch_row()) { $validIds[] = (int)$r[0]; }
+      $chk->close();
+      if ($validIds) {
+        $stmt = $conn->prepare('INSERT INTO tt_plan_people (plan_id, person_id) VALUES (?, ?)');
+        foreach ($validIds as $pid) { $stmt->bind_param('ii', $id, $pid); $stmt->execute(); }
+        $stmt->close();
+      }
+    }
+
+    $conn->commit();
+  } catch (Throwable $e) {
+    $conn->rollback();
+    fail('Could not save Plan: ' . $e->getMessage(), 500);
+  }
+
+  return $id;
+}
+
+function setPlanStatus(int $userId, int $id, string $status): void {
+  if (!in_array($status, PLAN_STATUSES, true)) { fail('Invalid status'); }
+  $stmt = db()->prepare('UPDATE tt_plans SET status = ? WHERE id = ? AND user_id = ?');
+  $stmt->bind_param('sii', $status, $id, $userId);
+  $stmt->execute();
+  $stmt->close();
+}
+
+function deletePlan(int $userId, int $id): void {
+  $stmt = db()->prepare('DELETE FROM tt_plans WHERE id = ? AND user_id = ?');
   $stmt->bind_param('ii', $id, $userId);
   $stmt->execute();
   $stmt->close();
@@ -882,7 +1090,7 @@ switch ($action) {
 
   case 'vocab': {
     respond(['ok' => true, 'statuses' => STATUSES, 'relationships' => RELATIONSHIPS,
-      'purposes' => PURPOSES, 'workTypes' => WORK_TYPES]);
+      'purposes' => PURPOSES, 'workTypes' => WORK_TYPES, 'planStatuses' => PLAN_STATUSES]);
   }
 
   // -- Temples --
@@ -970,6 +1178,43 @@ switch ($action) {
     $id = (int)($body['id'] ?? 0);
     if ($id <= 0) { fail('Missing visit id'); }
     deleteVisit((int)$user['id'], $id);
+    respond(['ok' => true]);
+  }
+
+  // -- Plans --
+
+  case 'plans': {
+    $user = requireMember();
+    respond(['ok' => true, 'plans' => plansForUser((int)$user['id'])]);
+  }
+
+  case 'addPlan': {
+    $user = requireMember();
+    $id = savePlan((int)$user['id'], $body, null);
+    respond(['ok' => true, 'id' => $id]);
+  }
+
+  case 'updatePlan': {
+    $user = requireMember();
+    $id = (int)($body['id'] ?? 0);
+    if ($id <= 0) { fail('Missing plan id'); }
+    savePlan((int)$user['id'], $body, $id);
+    respond(['ok' => true]);
+  }
+
+  case 'cancelPlan': {
+    $user = requireMember();
+    $id = (int)($body['id'] ?? 0);
+    if ($id <= 0) { fail('Missing plan id'); }
+    setPlanStatus((int)$user['id'], $id, 'Cancelled');
+    respond(['ok' => true]);
+  }
+
+  case 'deletePlan': {
+    $user = requireMember();
+    $id = (int)($body['id'] ?? 0);
+    if ($id <= 0) { fail('Missing plan id'); }
+    deletePlan((int)$user['id'], $id);
     respond(['ok' => true]);
   }
 

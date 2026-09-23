@@ -76,6 +76,18 @@ WHERE u.username = 'you@example.com' AND a.app_key = 'temple-time';
    message instead of a crash.
 4. Re-upload `api/api.php` and `api/config.php` by FTP.
 
+## 6. Phase 3: enable Plans
+
+1. Run the "PHASE 3: PLANS" section of `api/schema.sql` in phpMyAdmin
+   (adds `tt_plans` + three join tables, and one `ALTER TABLE` adding
+   `plan_id` to `tt_visits`). **Same ordering rule as Phase 2** -- run this
+   before uploading the Phase-3 `api.php`, since `saveVisit`/
+   `visitsForUser` now reference `tt_visits.plan_id` and several pages call
+   the new `plans` action.
+2. Re-upload `api/api.php` by FTP. No new `config.php` values needed --
+   Google Calendar is a client-side quick-add link (no API key) and Google
+   Maps just builds a URL, so there's nothing to configure server-side.
+
 ## Re-deploying after a change
 
 - Front end (`index.html`, `style.css`, `js/*.js`): push to GitHub, Pages
