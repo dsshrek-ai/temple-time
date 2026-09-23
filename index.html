@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Temple Time</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="bar">
+    <h1>Temple Time</h1>
+    <nav>
+      <a href="index.html" aria-current="page">Dashboard</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div id="content">
+    <p class="note">Loading...</p>
+  </div>
+</main>
+
+<script src="js/api.js"></script>
+<script>
+async function loadDashboard() {
+  const content = document.getElementById('content');
+  await captureSso();
+  try {
+    const [templesRes, visitsRes] = await Promise.all([
+      fetchData('temples'),
+      fetchData('visits'),
+    ]);
+    const temples = templesRes.temples || [];
+    const visits = visitsRes.visits || [];
+    const differentTemples = new Set(visits.map(v => v.TempleId)).size;
+    const thisYear = new Date().getFullYear();
+    const visitsThisYear = visits.filter(v => v.VisitDate && v.VisitDate.startsWith(String(thisYear))).length;
+
+    let html = `
+      <div class="stat-row">
+        <div class="stat-card"><div class="num">${visits.length}</div><div class="label">Total Visits</div></div>
+        <div class="stat-card"><div class="num">${differentTemples}</div><div class="label">Different Temples</div></div>
+        <div class="stat-card"><div class="num">${visitsThisYear}</div><div class="label">Visits This Year</div></div>
+        <div class="stat-card"><div class="num">${temples.length}</div><div class="label">Temples Tracked</div></div>
+      </div>
+    `;
+
+    if (temples.length === 0) {
+      html += `
+        <div class="empty-state card">
+          <h3>Welcome to Temple Time</h3>
+          <p>Begin building your temple journey.</p>
+          <p class="note">The full Add Temple / Quick Log screens are coming in the next build pass — this page currently confirms the backend (login, Temples, Visits) is wired up correctly.</p>
+        </div>`;
+    } else {
+      html += `<h2>Temples</h2><div class="card-grid">`;
+      for (const t of temples) {
+        const loc = [t.City, t.StateRegion].filter(Boolean).join(', ');
+        html += `
+          <div class="click-card">
+            <div class="thumb"></div>
+            <div class="body">
+              <p class="title">${escapeHtml(t.Name)}${t.Favorite ? ' ★' : ''}</p>
+              <p class="meta">${escapeHtml(loc)}</p>
+              <p class="meta">${t.VisitCount} visit${t.VisitCount === 1 ? '' : 's'}${t.LastVisitDate ? ' · last ' + escapeHtml(t.LastVisitDate) : ''}</p>
+            </div>
+          </div>`;
+      }
+      html += `</div>`;
+    }
+
+    content.innerHTML = html;
+  } catch (err) {
+    handleError(content, err);
+  }
+}
+loadDashboard();
+</script>
+</body>
+</html>
