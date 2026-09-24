@@ -16,6 +16,19 @@
 
 const BOOK_MARGIN = 54; // 0.75in, in the 'pt' unit the PDF is built with
 
+// PDF colors as [r, g, b], matching the app's royal blue palette in
+// style.css (--primary-dark, --accent, etc).
+const BOOK_COLORS = {
+  heading: [28, 58, 143],   // --primary-dark
+  label: [47, 95, 196],     // --accent
+  text: [30, 37, 51],       // --text
+  meta: [60, 68, 85],
+  muted: [90, 100, 120],    // --muted
+  faint: [150, 158, 172],
+  rule: [188, 211, 247],    // --nav-active
+  ring: [220, 231, 250],    // --light
+};
+
 function bookFileName(title) {
   const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
   return `${slug || 'temple-time-memories'}.pdf`;
@@ -46,7 +59,41 @@ function loadImageForBook(url) {
   });
 }
 
-async function generateMemoryBook({ visits, allPhotos, title, subtitle }) {
+// Like loadImageForBook, but crops to a circle for a Person's portrait on
+// the title page. The crop is biased toward the top (25%), the same as the
+// .person-photo CSS crop, so faces aren't cut off. The area outside the
+// circle is filled white to match the page, since JPEG has no transparency.
+function loadPortraitForBook(url) {
+  return new Promise(resolve => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      try {
+        const size = 600;
+        const side = Math.min(img.naturalWidth, img.naturalHeight);
+        const sx = (img.naturalWidth - side) / 2;
+        const sy = (img.naturalHeight - side) * 0.25;
+        const canvas = document.createElement('canvas');
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(0, 0, size, size);
+        ctx.beginPath();
+        ctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
+        ctx.clip();
+        ctx.drawImage(img, sx, sy, side, side, 0, 0, size, size);
+        resolve(canvas.toDataURL('image/jpeg', 0.9));
+      } catch (e) {
+        resolve(null); // tainted canvas (no CORS header) or similar
+      }
+    };
+    img.onerror = () => resolve(null);
+    img.src = url;
+  });
+}
+
+async function generateMemoryBook({ visits, allPhotos, title, subtitle, portraitUrl }) {
   if (!window.jspdf) {
     alert('The PDF library did not load -- check your connection and try again.');
     return;
@@ -65,7 +112,7 @@ async function generateMemoryBook({ visits, allPhotos, title, subtitle }) {
     }
   }
 
-  function addText(text, { size = 11, style = 'normal', color = [40, 36, 30], gapAfter = 10 } = {}) {
+  function addText(text, { size = 11, style = 'normal', color = BOOK_COLORS.text, gapAfter = 10 } = {}) {
     doc.setFont('helvetica', style);
     doc.setFontSize(size);
     doc.setTextColor(color[0], color[1], color[2]);
@@ -82,25 +129,42 @@ async function generateMemoryBook({ visits, allPhotos, title, subtitle }) {
   function addJournalSection(label, text) {
     if (!text) return;
     ensureSpace(20);
-    addText(label, { size: 11, style: 'bold', color: [138, 109, 59], gapAfter: 3 });
+    addText(label, { size: 11, style: 'bold', color: BOOK_COLORS.label, gapAfter: 3 });
     addText(text, { size: 10.5, gapAfter: 12 });
   }
 
   // ---- Title page ----
+  // Optional portrait (Person books) sits centered above the title; the
+  // whole portrait + title + subtitle block is centered vertically.
+  const portrait = portraitUrl ? await loadPortraitForBook(portraitUrl) : null;
+  const portraitSize = 170;
+  const portraitGap = 36;
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(26);
-  doc.setTextColor(95, 74, 38);
   const titleLines = doc.splitTextToSize(title, contentWidth);
-  let ty = pageHeight / 2 - (titleLines.length * 32) / 2 - 20;
+  const blockH = (portrait ? portraitSize + portraitGap : 0) + titleLines.length * 32 + (subtitle ? 28 : 0);
+  let ty = pageHeight / 2 - blockH / 2 - 20;
+  if (portrait) {
+    const px = (pageWidth - portraitSize) / 2;
+    doc.addImage(portrait, 'JPEG', px, ty, portraitSize, portraitSize);
+    doc.setDrawColor(BOOK_COLORS.ring[0], BOOK_COLORS.ring[1], BOOK_COLORS.ring[2]);
+    doc.setLineWidth(4);
+    doc.circle(pageWidth / 2, ty + portraitSize / 2, portraitSize / 2, 'S');
+    ty += portraitSize + portraitGap + 20; // + 20: text is drawn from its baseline
+  } else {
+    ty += 20;
+  }
+  doc.setTextColor(BOOK_COLORS.heading[0], BOOK_COLORS.heading[1], BOOK_COLORS.heading[2]);
   titleLines.forEach(line => { doc.text(line, pageWidth / 2, ty, { align: 'center' }); ty += 32; });
   if (subtitle) {
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(13);
-    doc.setTextColor(100, 95, 85);
+    doc.setTextColor(BOOK_COLORS.muted[0], BOOK_COLORS.muted[1], BOOK_COLORS.muted[2]);
     doc.text(subtitle, pageWidth / 2, ty + 14, { align: 'center' });
   }
+  doc.setFont('helvetica', 'normal');
   doc.setFontSize(9.5);
-  doc.setTextColor(160, 155, 145);
+  doc.setTextColor(BOOK_COLORS.faint[0], BOOK_COLORS.faint[1], BOOK_COLORS.faint[2]);
   doc.text(`Generated ${new Date().toLocaleDateString()} by Temple Time`, pageWidth / 2, pageHeight - BOOK_MARGIN, { align: 'center' });
 
   if (!visits.length) {
@@ -132,16 +196,16 @@ async function generateMemoryBook({ visits, allPhotos, title, subtitle }) {
 
     if (i > 0) {
       ensureSpace(30);
-      doc.setDrawColor(205, 195, 175);
+      doc.setDrawColor(BOOK_COLORS.rule[0], BOOK_COLORS.rule[1], BOOK_COLORS.rule[2]);
       doc.setLineWidth(0.75);
       doc.line(BOOK_MARGIN, y, pageWidth - BOOK_MARGIN, y);
       y += 20;
     }
     ensureSpace(90); // room for the heading + date line + first meta line, so a lone heading doesn't get orphaned at a page's bottom
 
-    addText(v.TempleName, { size: 18, style: 'bold', color: [95, 74, 38], gapAfter: 4 });
+    addText(v.TempleName, { size: 18, style: 'bold', color: BOOK_COLORS.heading, gapAfter: 4 });
     const loc = [v.TempleCity, v.TempleState].filter(Boolean).join(', ');
-    addText(`${formatDate(v.VisitDate)}${loc ? ' · ' + loc : ''}${v.FavoriteVisit ? '  ★' : ''}`, { size: 11, style: 'italic', color: [110, 105, 95], gapAfter: 10 });
+    addText(`${formatDate(v.VisitDate)}${loc ? ' · ' + loc : ''}${v.FavoriteVisit ? '  ★' : ''}`, { size: 11, style: 'italic', color: BOOK_COLORS.muted, gapAfter: 10 });
 
     const metaBits = [];
     if ((v.WhoWith || []).length) metaBits.push(`Who With: ${v.WhoWith.map(p => p.Name).join(', ')}`);
@@ -153,7 +217,7 @@ async function generateMemoryBook({ visits, allPhotos, title, subtitle }) {
     }
     if (v.ArrivalTime) metaBits.push(`Arrival: ${formatTime(v.ArrivalTime)}`);
     if (v.DepartureTime) metaBits.push(`Departure: ${formatTime(v.DepartureTime)}`);
-    metaBits.forEach(line => addText(line, { size: 10.5, color: [70, 65, 58], gapAfter: 3 }));
+    metaBits.forEach(line => addText(line, { size: 10.5, color: BOOK_COLORS.meta, gapAfter: 3 }));
     if (metaBits.length) y += 8;
 
     addJournalSection('Notes', v.Notes);

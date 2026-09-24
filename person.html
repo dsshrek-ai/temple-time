@@ -186,6 +186,7 @@ async function loadPerson() {
       visits: _togetherVisits,
       allPhotos: _allPhotos,
       title: `Memories with ${name}`,
+      portraitUrl: _person.PhotoUrl,
       subtitle: `${_togetherVisits.length} Visit${_togetherVisits.length === 1 ? '' : 's'} together`,
     }));
   } catch (err) {
